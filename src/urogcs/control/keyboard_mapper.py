@@ -2,53 +2,99 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, Set
+from typing import Dict, Iterable, Set, Optional
+
+import sys
+import select
+import termios
+import tty
 
 from urogcs.protocol.messages import DofCommand
 
 
 @dataclass
 class KeyProfile:
-    """
-    Keyboard mapping profile.
-    step: per-tick increment in normalized [-1,1] space.
-    decay: when key not pressed, command decays toward 0 (0..1).
-    """
     step: float = 0.08
     decay: float = 0.85
 
 
 DEFAULT_BINDINGS: Dict[str, str] = {
-    # translation
     "w": "surge+",
     "s": "surge-",
     "a": "sway-",
     "d": "sway+",
     "r": "heave+",
     "f": "heave-",
-    # rotation
     "q": "yaw-",
     "e": "yaw+",
     "j": "roll-",
     "l": "roll+",
     "i": "pitch+",
     "k": "pitch-",
-    # safety / mode (handled by app layer typically)
-    # "space": "estop",
-    # "tab": "arm_toggle",
 }
+
+
+@dataclass
+class KeyEvent:
+    key: str
+
+
+class _StdinPoller:
+    """Non-blocking single-char poller for Linux TUI."""
+    def __init__(self) -> None:
+        self._fd = sys.stdin.fileno()
+        self._old = termios.tcgetattr(self._fd)
+        tty.setcbreak(self._fd)
+
+    def close(self) -> None:
+        termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old)
+
+    def poll(self) -> Optional[str]:
+        r, _, _ = select.select([sys.stdin], [], [], 0.0)
+        if not r:
+            return None
+        return sys.stdin.read(1)
 
 
 class KeyboardMapper:
     """
     Stateful mapper: keeps last command and updates with key presses.
-    App layer provides currently pressed keys each tick.
+
+    Two roles for current integration:
+    1) poll(): non-blocking key event source (Linux stdin)
+    2) update(pressed): mapping pressed keys -> DofCommand
     """
     def __init__(self, profile: KeyProfile | None = None, bindings: Dict[str, str] | None = None) -> None:
         self.profile = profile or KeyProfile()
         self.bindings = bindings or dict(DEFAULT_BINDINGS)
         self.cmd = DofCommand()
+        self._poller: Optional[_StdinPoller] = None
 
+    # --------- input layer ---------
+    def poll(self) -> Optional[KeyEvent]:
+        """
+        Non-blocking poll.
+        Returns KeyEvent(key=...) or None.
+        """
+        if self._poller is None:
+            self._poller = _StdinPoller()
+        ch = self._poller.poll()
+        if ch is None:
+            return None
+        # Normalize: lower-case for bindings
+        if ch == "\x1b":  # ESC
+            return KeyEvent(key="esc")
+        if ch == "\n" or ch == "\r":
+            return KeyEvent(key="enter")
+        return KeyEvent(key=ch.lower())
+
+    def close(self) -> None:
+        """Restore terminal state."""
+        if self._poller is not None:
+            self._poller.close()
+            self._poller = None
+
+    # --------- mapping layer ---------
     def _apply_decay(self) -> None:
         p = self.profile.decay
         self.cmd.surge *= p
@@ -59,18 +105,10 @@ class KeyboardMapper:
         self.cmd.yaw *= p
 
     def update(self, pressed: Iterable[str]) -> DofCommand:
-        """
-        pressed: iterable of key names (e.g., {"w","a","q"}).
-        Returns a new command snapshot (also stored internally).
-        """
         pressed_set: Set[str] = set(pressed)
-
-        # decay first (smooth stop)
         self._apply_decay()
-
         step = self.profile.step
 
-        # apply bindings
         for k in pressed_set:
             act = self.bindings.get(k)
             if not act:
