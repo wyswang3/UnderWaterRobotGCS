@@ -50,6 +50,7 @@ class MsgType(IntEnum):
     SET_MODE        = 20
     SET_DOF_CMD     = 21
     ESTOP           = 22
+    ARM             = 23      # ★ 新增：Arm / Disarm
 
     # telemetry (ROV -> GCS)
     STATUS          = 40

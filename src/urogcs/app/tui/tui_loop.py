@@ -6,9 +6,9 @@ tui_loop.py
 
 终端 TUI 主循环：
 
-- 负责与香橙派 / gateway 的 UDP 会话（通过 GcsService 封装 GcsSessionClient）；
-- 负责本地键盘控制（WASD/QE/HG/RT/FV → 6DOF）；
-- 负责离散命令（急停、模式切换、油门调整等）的分发；
+- 通过 GcsService 与香橙派 / gateway 建立 UDP 会话；
+- 使用 KeyboardMapper + tui_keys 将键盘输入映射为 6DOF 连续指令 + 离散动作；
+- 转发 ESTOP / ARM / 模式切换 / 油门调整 到 gateway；
 - 通过 TuiDashboard 以多行 HUD 形式展示当前状态，避免刷屏。
 
 分层约定：
@@ -19,7 +19,6 @@ tui_loop.py
 """
 
 import time
-from typing import Optional
 
 from urogcs.protocol.messages import DofCommand
 from urogcs.protocol.wire import WireControlMode
@@ -40,17 +39,18 @@ def run_tui(cfg: TuiConfig) -> int:
       1) 创建 GcsService（内部封装 GcsSessionClient），完成握手；
       2) 创建 KeyboardMapper + Keyboard（Linux / Dummy）；
       3) 在固定周期内：
-         - poll 接收包；
+         - poll 接收包（STATUS / ACK 等）；
          - 发送心跳；
          - 读取键盘 → 连续 DOF + 离散动作；
-         - 应用简单的急停 + 全局油门（所有安全逻辑仍由下位机最终裁决）；
-         - 发送 SET_DOF；
+         - 应用简单的急停 + 全局油门（最终安全逻辑仍由下位机裁决）；
+         - 下发 SET_DOF；
          - 刷新 HUD 仪表盘。
     """
+
     # ----------------------------
     # 1. 会话 & 状态回调
     # ----------------------------
-    last_status = None        # gateway Telemetry 状态（可能为 None）
+    last_status = None        # gateway STATUS Telemetry（可能为 None）
     last_log_line = ""        # 最近一条日志文本
 
     def on_status(st):
@@ -97,10 +97,17 @@ def run_tui(cfg: TuiConfig) -> int:
     current_mode = WireControlMode.Manual
     raw_cmd = DofCommand()
 
+    # ★ 本地“ARM 状态感知”（仅用于提示，不参与真正安全裁决）
+    armed_local = False
+    last_arm_log_ns = 0  # ARM 提示限流
+
     # 键盘错误日志限流（避免刷屏）
     last_kb_error_msg = ""
     last_kb_error_ns = 0
     kb_error_suppressed = 0
+
+    # 为“按键集合变化”打印做一个本地快照
+    last_keys_snapshot = set()
 
     # ----------------------------
     # 4. 启动 / 握手
@@ -172,11 +179,14 @@ def run_tui(cfg: TuiConfig) -> int:
 
                 # --- 5.3.4 Arm / Disarm / Center / Help ---
                 if actions.arm:
-                    # 目前协议侧暂未定义 Arm 命令，这里先打日志占位
-                    on_log("[KB] Arm requested (not wired to protocol yet)")
+                    svc.request_arm(True, ack_req=True)
+                    armed_local = True
+                    on_log("[KB] Arm requested (sent to gateway)")
 
                 if actions.disarm:
-                    on_log("[KB] Disarm requested (not wired to protocol yet)")
+                    svc.request_arm(False, ack_req=True)
+                    armed_local = False
+                    on_log("[KB] Disarm requested (sent to gateway)")
 
                 if actions.center:
                     # 仅清空当前 DOF，不改变 estop 状态
@@ -189,20 +199,15 @@ def run_tui(cfg: TuiConfig) -> int:
                 # --- 5.3.5 全局油门调整 ---
                 if actions.throttle_delta != 0.0:
                     old_thr = throttle
-                    throttle = max(0.0, min(1.0, throttle + actions.throttle_delta))
+                    throttle = max(0.0, min(1.01, throttle + actions.throttle_delta))
                     if abs(throttle - old_thr) > 1e-3:
                         on_log(f"[KB] throttle changed -> {throttle:.2f}")
 
-                # --- 5.3.6 连续 DOF 更新 ---
-                # 每 tick 都调用 update（即使 keys 为空），以便实现“松手衰减”效果。
-                if not hasattr(run_tui, "_last_keys"):
-                    run_tui._last_keys = set()  # type: ignore[attr-defined]
-
-                last_keys_snapshot = run_tui._last_keys  # type: ignore[attr-defined]
+                # --- 5.3.6 连续 DOF 更新 + 键盘变化日志 ---
                 if keys != last_keys_snapshot and keys:
-                    # 只在按键集合发生变化且非空时打印一次，避免刷屏。
+                    # 只在按键集合发生变化且非空时打印一次，避免刷屏
                     on_log(f"[KB] keys={''.join(sorted(keys))}")
-                    run_tui._last_keys = set(keys)  # type: ignore[attr-defined]
+                    last_keys_snapshot = set(keys)
 
                 try:
                     raw_cmd = mapper.update(keys)
@@ -226,7 +231,7 @@ def run_tui(cfg: TuiConfig) -> int:
                     cmd_to_send = DofCommand()
 
                 # 应用全局油门缩放（由上位机表达“意图”，下位机仍可再限幅）
-                if throttle < 1.0:
+                if throttle < 1.1:
                     cmd_to_send = DofCommand(
                         surge=cmd_to_send.surge * throttle,
                         sway=cmd_to_send.sway * throttle,
@@ -236,10 +241,15 @@ def run_tui(cfg: TuiConfig) -> int:
                         yaw=cmd_to_send.yaw * throttle,
                     )
 
-                # 5.5 下发 DOF 命令
+                # 5.5 下发 DOF 命令（始终下发，由下位机根据 ARM/ESTOP 决定是否“接受”）
                 if now >= next_send_ns:
                     while now >= next_send_ns:
                         next_send_ns += send_period_ns
+
+                    # 若本地认为未 ARM，则低频提醒操作者，但仍然把“意图”发下去。
+                    if not armed_local and now - last_arm_log_ns > 2 * 1_000_000_000:
+                        on_log("[KB] ROV not armed (press ',' to ARM) — DOF may be ignored downstream.")
+                        last_arm_log_ns = now
 
                     on_log(
                         "[TX] SET_DOF "

@@ -1,5 +1,23 @@
 from __future__ import annotations
 
+"""
+urogcs.session.session_client
+
+面向 ROV 的 GCS UDP 会话客户端（Python 侧）：
+
+- 负责底层 UDP 收发；
+- 实现 CONNECT_REQ / CONNECT_ACK / CONNECT_CONFIRM 三步握手；
+- 解析 STATUS / ACK 报文，维护会话状态；
+- 提供 send_* 系列方法发送 ESTOP / MODE / DOF / ARM 等控制指令。
+
+上层（例如 service.py / TUI）应尽量只依赖：
+    - handshake()
+    - poll()
+    - send_heartbeat()
+    - send_set_mode() / send_set_dof() / send_estop() / send_arm()
+    - state / last_status 属性
+"""
+
 import os
 import socket
 import time
@@ -10,13 +28,14 @@ from urogcs.protocol.codec import (
     parse_and_validate,
     decode_connect_ack,
     decode_status,
-    decode_ack,  # NEW: decode_ack(hdr, payload) -> (ack_seq, ack_code_u16, reason)
+    decode_ack,          # decode_ack(hdr, payload) -> (ack_seq, ack_code_u16, reason)
     encode_connect_req,
     encode_connect_confirm,
     encode_heartbeat,
     encode_set_mode,
     encode_set_dof,
     encode_estop,
+    encode_arm,          # ARM / DISARM
 )
 from urogcs.protocol.wire import (
     MsgType,
@@ -24,65 +43,80 @@ from urogcs.protocol.wire import (
     Flags,
     WireControlMode,
 )
-
 from urogcs.protocol.messages import DofCommand, StatusTelemetry
 
 
 # =============================================================================
-# Debug logger (default OFF)
+# Debug logger 配置
 # =============================================================================
 
 @dataclass
 class DebugConfig:
-    enabled: bool = False
-    rx_hex: bool = False          # 打印收到的包十六进制（建议先关，必要时开）
-    tx_hex: bool = False          # 打印发送包十六进制
-    max_hex_bytes: int = 96       # hex 打印截断长度
-    verbose_poll: bool = False    # poll 每包打印
+    enabled: bool = False          # 全局开关
+    rx_hex: bool = False           # 打印收到的包十六进制
+    tx_hex: bool = False           # 打印发送包十六进制
+    max_hex_bytes: int = 96        # hex 打印截断长度
+    verbose_poll: bool = False     # poll 时每包打印一行详情
 
 
 def _hexdump(b: bytes, max_len: int = 96) -> str:
+    """将二进制数据格式化为十六进制字符串（用于调试日志）."""
     if not b:
         return ""
     bb = b[:max_len]
     s = " ".join(f"{x:02x}" for x in bb)
     if len(b) > max_len:
-        s += f" ...(+{len(b)-max_len})"
+        s += f" ...(+{len(b) - max_len})"
     return s
 
 
 # =============================================================================
-# State
+# 会话状态与握手配置
 # =============================================================================
 
 @dataclass
 class SessionState:
-    established: bool = False
+    """GCS 客户端会话状态（简单版本，供上层只读使用）."""
+
+    established: bool = False      # 是否已完成握手
     session_id: int = 0
 
     gcs_nonce: int = 0
     rov_nonce: int = 0
 
     # sequencing
-    tx_seq: int = 1      # wire header.seq for client->server packets
-    cmd_seq: int = 1     # if you need separate command sequence later
+    tx_seq: int = 1                # wire header.seq for client->server packets
+    cmd_seq: int = 1               # 预留：如果后续需要独立命令序号
 
 
 @dataclass
 class HandshakeConfig:
-    timeout_s: float = 2.0
-    confirm_ack_timeout_s: float = 2.0
-    rx_poll_max_packets: int = 32
-    require_confirm_ack: bool = True
-    allow_status_established: bool = True
-    debug: bool = False
+    """握手流程参数配置."""
+
+    timeout_s: float = 2.0                # CONNECT_ACK 等待超时
+    confirm_ack_timeout_s: float = 2.0    # CONNECT_CONFIRM 的 ACK 等待超时
+    rx_poll_max_packets: int = 32         # 进入第二阶段时每轮 poll 的最大包数
+    require_confirm_ack: bool = True      # 是否必须收到 CONFIRM 的 ACK
+    allow_status_established: bool = True # 是否允许通过 STATUS 中的标志判定已建立
+    debug: bool = False                   # 打开后打印更详细的握手日志
 
 
 # =============================================================================
-# Client
+# Client 实现
 # =============================================================================
 
 class GcsSessionClient:
+    """
+    GCS 会话客户端（底层 UDP + 协议封装）.
+
+    职责：
+      - 管理 UDP socket 与目标 ROV 地址；
+      - 实现握手流程（handshake）；
+      - 解析 STATUS / ACK 等消息，更新内部 SessionState 与 last_status；
+      - 提供 send_* 系列 API 供上层发送控制命令；
+      - 提供 poll() 供上层在主循环中调用。
+    """
+
     def __init__(
         self,
         rov_addr: Tuple[str, int],
@@ -90,7 +124,7 @@ class GcsSessionClient:
         recv_timeout_ms: int = 20,
         on_status: Optional[Callable[[StatusTelemetry], None]] = None,
         on_log: Optional[Callable[[str], None]] = None,
-        debug: Optional[bool] = None,  # if None -> env UROGCS_DEBUG
+        debug: Optional[bool] = None,  # 若为 None，则参考环境变量 UROGCS_DEBUG
     ) -> None:
         self.rov_addr = rov_addr
         self.bind_addr = bind_addr
@@ -99,11 +133,12 @@ class GcsSessionClient:
         self.on_status = on_status
         self.on_log = on_log
 
+        # -------- Debug 开关初始化 --------
         env_dbg = os.getenv("UROGCS_DEBUG", "0").strip() not in ("0", "", "false", "False")
         dbg_enabled = env_dbg if debug is None else bool(debug)
         self.dbg = DebugConfig(enabled=dbg_enabled)
 
-        # allow finer toggles
+        # 更细粒度的环境变量开关
         self.dbg.rx_hex = os.getenv("UROGCS_DEBUG_RX_HEX", "0") == "1"
         self.dbg.tx_hex = os.getenv("UROGCS_DEBUG_TX_HEX", "0") == "1"
         self.dbg.verbose_poll = os.getenv("UROGCS_DEBUG_VERBOSE_POLL", "0") == "1"
@@ -112,39 +147,71 @@ class GcsSessionClient:
         except Exception:
             pass
 
+        # -------- UDP socket 初始化 --------
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(self.bind_addr)
         self.sock.settimeout(max(0.001, self.recv_timeout_ms / 1000.0))
 
+        # 会话状态
         self.st = SessionState()
 
         self.last_error: str = ""
         self._last_status: Optional[StatusTelemetry] = None
 
-        # handshake ack tracking
+        # 握手 / 命令 ACK 跟踪
         self._pending_ack_seq: Optional[int] = None
         self._pending_ack_code: Optional[AckCode] = None
         self._pending_ack_reason: Optional[int] = None
 
-        self._log(f"[INIT] bind={self.bind_addr[0]}:{self.bind_addr[1]} target={self.rov_addr[0]}:{self.rov_addr[1]}")
+        self._log(
+            f"[INIT] bind={self.bind_addr[0]}:{self.bind_addr[1]} "
+            f"target={self.rov_addr[0]}:{self.rov_addr[1]}"
+        )
         if self.dbg.enabled:
-            self._log(f"[DBG] enabled=1 rx_hex={int(self.dbg.rx_hex)} tx_hex={int(self.dbg.tx_hex)} verbose_poll={int(self.dbg.verbose_poll)}")
+            self._log(
+                f"[DBG] enabled=1 rx_hex={int(self.dbg.rx_hex)} "
+                f"tx_hex={int(self.dbg.tx_hex)} verbose_poll={int(self.dbg.verbose_poll)}"
+            )
+
+    # -------------------------------------------------------------------------
+    # 属性访问（建议上层通过 property 读取）
+    # -------------------------------------------------------------------------
+
+    @property
+    def state(self) -> SessionState:
+        """
+        当前会话状态（只读快照）.
+
+        注意：这是对 self.st 的浅引用，外层请视作只读，不要修改字段。
+        """
+        return self.st
+
+    @property
+    def last_status(self) -> Optional[StatusTelemetry]:
+        """最近一次收到并成功 decode 的 STATUS 报文."""
+        return self._last_status
 
     # -------------------------------------------------------------------------
     # logging helpers
     # -------------------------------------------------------------------------
 
     def _log(self, s: str) -> None:
+        """
+        统一日志入口：
+          - 若上层提供 on_log，则优先调用；
+          - 若 debug.enabled，则也打印到 stdout 方便调试。
+        """
         if self.on_log:
             try:
                 self.on_log(s)
             except Exception:
+                # 保底不影响主流程
                 pass
-        # 调试时同时打印到 stdout，方便你在 TUI 里看到
         if self.dbg.enabled:
             print(s, flush=True)
 
     def _set_err(self, s: str) -> None:
+        """记录并打印错误（会更新 last_error）."""
         self.last_error = s
         self._log(s)
 
@@ -153,25 +220,28 @@ class GcsSessionClient:
     # -------------------------------------------------------------------------
 
     def close(self) -> None:
+        """关闭底层 UDP socket."""
         try:
             self.sock.close()
         except Exception:
             pass
 
     def _send(self, pkt: bytes) -> None:
+        """封装 sendto + 可选 TX 调试输出."""
         if self.dbg.enabled:
             self._log(f"[TX] -> {self.rov_addr} bytes={len(pkt)}")
             if self.dbg.tx_hex:
-                self._log(f"[TX_HEX] { _hexdump(pkt, self.dbg.max_hex_bytes) }")
+                self._log(f"[TX_HEX] {_hexdump(pkt, self.dbg.max_hex_bytes)}")
         self.sock.sendto(pkt, self.rov_addr)
 
     def _recv_once(self) -> Optional[Tuple[bytes, Tuple[str, int]]]:
+        """尝试接收一帧 UDP 数据，失败或超时返回 None."""
         try:
             data, addr = self.sock.recvfrom(2048)
             if self.dbg.enabled:
                 self._log(f"[RX] <- {addr} bytes={len(data)}")
                 if self.dbg.rx_hex:
-                    self._log(f"[RX_HEX] { _hexdump(data, self.dbg.max_hex_bytes) }")
+                    self._log(f"[RX_HEX] {_hexdump(data, self.dbg.max_hex_bytes)}")
             return data, addr
         except socket.timeout:
             return None
@@ -184,6 +254,7 @@ class GcsSessionClient:
     # -------------------------------------------------------------------------
 
     def _handle_connect_ack(self, session_id: int, payload: bytes, debug: bool = False) -> bool:
+        """处理 CONNECT_ACK，验证 nonce / session_id，并更新 state."""
         try:
             gcs_nonce_echo, rov_nonce, rov_caps, result_code = decode_connect_ack(payload)
         except Exception as e:
@@ -195,7 +266,10 @@ class GcsSessionClient:
             return False
 
         if gcs_nonce_echo != self.st.gcs_nonce:
-            self._log(f"[HS] CONNECT_ACK nonce mismatch: echo={gcs_nonce_echo} expected={self.st.gcs_nonce}")
+            self._log(
+                f"[HS] CONNECT_ACK nonce mismatch: echo={gcs_nonce_echo} "
+                f"expected={self.st.gcs_nonce}"
+            )
             return False
 
         if session_id == 0 or rov_nonce == 0:
@@ -205,14 +279,19 @@ class GcsSessionClient:
         self.st.session_id = int(session_id)
         self.st.rov_nonce = int(rov_nonce)
 
-        self._log(f"[HS] got CONNECT_ACK session_id={self.st.session_id} rov_nonce={self.st.rov_nonce} caps={rov_caps}")
+        self._log(
+            f"[HS] got CONNECT_ACK session_id={self.st.session_id} "
+            f"rov_nonce={self.st.rov_nonce} caps={rov_caps}"
+        )
         return True
 
     def _handle_ack(self, hdr, payload: bytes) -> None:
         """
-        NEW ACK contract:
-          - hdr.ack_seq is the seq being acknowledged
-          - payload is 4 bytes: u16 ack_code, u16 reason
+        ACK 报文处理逻辑：
+
+        协议约定：
+          - hdr.ack_seq 是被确认的 seq；
+          - payload 为 4 字节：u16 ack_code, u16 reason。
         """
         try:
             ack_seq, ack_code_u16, reason = decode_ack(hdr, payload)
@@ -230,10 +309,10 @@ class GcsSessionClient:
             self._log(f"[RX][ACK] matched pending ack_seq={ack_seq} code={code.name}")
 
     def _status_indicates_established(self) -> bool:
+        """从最近 STATUS 中判断是否已建立会话（session_established=1）."""
         st = self._last_status
         if not st:
             return False
-        # C++ StatusTelemetry.session_established: 0/1
         return int(st.session_established) == 1
 
     # -------------------------------------------------------------------------
@@ -242,7 +321,11 @@ class GcsSessionClient:
 
     def poll(self, max_packets: int = 16) -> None:
         """
-        Pull up to max_packets from UDP, parse, and dispatch.
+        从 UDP 中拉取最多 max_packets 个数据包，解析并分发处理。
+
+        - STATUS      -> decode_status() 更新 self._last_status 并调用 on_status；
+        - ACK         -> 交给 _handle_ack() 处理 pending ack；
+        - 其它类型    -> 目前忽略（必要时再扩展）。
         """
         for _ in range(max_packets):
             rx = self._recv_once()
@@ -252,14 +335,22 @@ class GcsSessionClient:
 
             pp, code, err = parse_and_validate(data)
             if not pp:
-                # 这条日志是你目前最需要的：说明为啥 ACK/STATUS 被丢弃
-                self._log(f"[RX] parse failed: {code.name} {err} from {addr} len={len(data)}")
+                # 这条日志是目前排查 ACK/STATUS 丢包的关键信息
+                self._log(
+                    f"[RX] parse failed: {code.name} {err} "
+                    f"from {addr} len={len(data)}"
+                )
                 continue
 
             mt = MsgType(pp.hdr.msg_type)
 
             if self.dbg.enabled and self.dbg.verbose_poll:
-                self._log(f"[RX] parsed mt={mt.name} seq={pp.hdr.seq} sid={pp.hdr.session_id} flags=0x{pp.hdr.flags:04x} plen={pp.hdr.payload_len} ack_seq={pp.hdr.ack_seq}")
+                self._log(
+                    "[RX] parsed "
+                    f"mt={mt.name} seq={pp.hdr.seq} sid={pp.hdr.session_id} "
+                    f"flags=0x{pp.hdr.flags:04x} plen={pp.hdr.payload_len} "
+                    f"ack_seq={pp.hdr.ack_seq}"
+                )
 
             if mt == MsgType.STATUS:
                 try:
@@ -275,23 +366,32 @@ class GcsSessionClient:
                 self._handle_ack(pp.hdr, pp.payload)
                 continue
 
-            # other packets can be added later
+            # 其他类型目前忽略，后续需要时再扩展
             # self._log(f"[RX] ignore mt={mt.name}")
 
     # -------------------------------------------------------------------------
     # handshake
     # -------------------------------------------------------------------------
 
-    def handshake(self, timeout_s: float = 2.0, hs_cfg: Optional[HandshakeConfig] = None) -> bool:
+    def handshake(self, timeout_s: float = 2.0,
+                  hs_cfg: Optional[HandshakeConfig] = None) -> bool:
         """
-        Robust handshake:
-        - CONNECT_REQ -> wait CONNECT_ACK
-        - CONNECT_CONFIRM (ACK_REQ)
-        - wait ACK(match confirm_seq) OR (optional) STATUS indicates established
+        可靠握手流程：
+
+          1) 发送 CONNECT_REQ；
+          2) 等待 CONNECT_ACK，验证 nonce / session_id / rov_nonce；
+          3) 发送带 ACK_REQ 的 CONNECT_CONFIRM；
+          4) 等待：
+              - CONFIRM 对应的 ACK（require_confirm_ack=True），或
+              - STATUS 中的 session_established=1（allow_status_established=True）。
+
+        返回：
+          - True  表示握手成功，st.established 会被置为 True；
+          - False 表示握手失败，可查看 last_error。
         """
         cfg = hs_cfg or HandshakeConfig(timeout_s=timeout_s)
         if self.dbg.enabled:
-            cfg.debug = True  # 调试模式自动打开更详细行为
+            cfg.debug = True  # 调试模式自动打开握手日志
 
         # reset state
         self.last_error = ""
@@ -308,14 +408,18 @@ class GcsSessionClient:
         # client nonce
         self.st.gcs_nonce = int.from_bytes(os.urandom(8), "little")
 
-        # 1) send CONNECT_REQ
+        # ---- 1) send CONNECT_REQ ----
         req_seq = self.st.tx_seq
-        pkt = encode_connect_req(seq=req_seq, gcs_nonce=self.st.gcs_nonce, flags=Flags(0))
+        pkt = encode_connect_req(
+            seq=req_seq,
+            gcs_nonce=self.st.gcs_nonce,
+            flags=Flags(0),
+        )
         self._send(pkt)
         self._log(f"[HS] sent CONNECT_REQ seq={req_seq} gcs_nonce={self.st.gcs_nonce}")
         self.st.tx_seq += 1
 
-        # 2) wait CONNECT_ACK
+        # ---- 2) wait CONNECT_ACK ----
         t0 = time.time()
         got_connect_ack = False
 
@@ -327,21 +431,33 @@ class GcsSessionClient:
 
             pp, code, err = parse_and_validate(data)
             if not pp:
-                self._log(f"[HS] parse failed: {code.name} {err} from {addr} len={len(data)}")
+                self._log(
+                    f"[HS] parse failed: {code.name} {err} "
+                    f"from {addr} len={len(data)}"
+                )
                 continue
 
             mt = MsgType(pp.hdr.msg_type)
 
             if cfg.debug:
-                self._log(f"[HS][DBG] mt={mt.name} seq={pp.hdr.seq} sid={pp.hdr.session_id} flags=0x{pp.hdr.flags:04x} plen={pp.hdr.payload_len} ack_seq={pp.hdr.ack_seq}")
+                self._log(
+                    "[HS][DBG] "
+                    f"mt={mt.name} seq={pp.hdr.seq} sid={pp.hdr.session_id} "
+                    f"flags=0x{pp.hdr.flags:04x} plen={pp.hdr.payload_len} "
+                    f"ack_seq={pp.hdr.ack_seq}"
+                )
 
             if mt == MsgType.CONNECT_ACK:
-                got_connect_ack = self._handle_connect_ack(pp.hdr.session_id, pp.payload, debug=cfg.debug)
+                got_connect_ack = self._handle_connect_ack(
+                    pp.hdr.session_id,
+                    pp.payload,
+                    debug=cfg.debug,
+                )
                 if got_connect_ack:
                     break
                 continue
 
-            # allow STATUS/ACK background
+            # 允许在握手阶段同时收到 STATUS / ACK（不作为错误）
             if mt == MsgType.STATUS:
                 try:
                     st = decode_status(pp.payload)
@@ -353,7 +469,6 @@ class GcsSessionClient:
                 continue
 
             if mt == MsgType.ACK:
-                # 通常不会在这一阶段收到 ACK，但也不应崩
                 self._handle_ack(pp.hdr, pp.payload)
                 continue
 
@@ -362,10 +477,13 @@ class GcsSessionClient:
             return False
 
         if self.st.session_id == 0 or self.st.rov_nonce == 0:
-            self._set_err(f"[HS] invalid session params: session_id={self.st.session_id} rov_nonce={self.st.rov_nonce}")
+            self._set_err(
+                f"[HS] invalid session params: "
+                f"session_id={self.st.session_id} rov_nonce={self.st.rov_nonce}"
+            )
             return False
 
-        # 3) send CONNECT_CONFIRM with ACK_REQ
+        # ---- 3) send CONNECT_CONFIRM with ACK_REQ ----
         confirm_seq = self.st.tx_seq
         pkt2 = encode_connect_confirm(
             seq=confirm_seq,
@@ -378,10 +496,13 @@ class GcsSessionClient:
         self._pending_ack_reason = None
 
         self._send(pkt2)
-        self._log(f"[HS] sent CONNECT_CONFIRM seq={confirm_seq} session_id={self.st.session_id}")
+        self._log(
+            f"[HS] sent CONNECT_CONFIRM seq={confirm_seq} "
+            f"session_id={self.st.session_id}"
+        )
         self.st.tx_seq += 1
 
-        # 4) wait confirm ACK or STATUS established
+        # ---- 4) wait confirm ACK or STATUS established ----
         t1 = time.time()
         while time.time() - t1 < cfg.confirm_ack_timeout_s:
             self.poll(max_packets=cfg.rx_poll_max_packets)
@@ -396,7 +517,12 @@ class GcsSessionClient:
                     self.st.established = True
                     self._log("[HS] established via CONFIRM ACK")
                     return True
-                self._set_err(f"[HS] CONNECT_CONFIRM rejected: {self._pending_ack_code.name} reason={self._pending_ack_reason}")
+
+                self._set_err(
+                    "[HS] CONNECT_CONFIRM rejected: "
+                    f"{self._pending_ack_code.name} "
+                    f"reason={self._pending_ack_reason}"
+                )
                 return False
 
             time.sleep(0.005)
@@ -405,6 +531,7 @@ class GcsSessionClient:
             self._set_err("[HS] CONNECT_CONFIRM ACK timeout")
             return False
 
+        # 乐观模式：即便没收到 ACK，也认为 established
         self.st.established = True
         self._log("[HS] established (optimistic)")
         return True
@@ -414,38 +541,132 @@ class GcsSessionClient:
     # -------------------------------------------------------------------------
 
     def send_heartbeat(self, use_session: bool = True, ack_req: bool = False) -> None:
+        """发送心跳包，可选是否带 session_id / ACK_REQ."""
         sid = self.st.session_id if use_session else 0
         flags = Flags.ACK_REQ if ack_req else Flags(0)
-        pkt = encode_heartbeat(seq=self.st.tx_seq, session_id=sid, now_ms=int(time.monotonic() * 1000) & 0xFFFFFFFF, flags=flags)
+        now_ms = int(time.monotonic() * 1000) & 0xFFFFFFFF
+        pkt = encode_heartbeat(
+            seq=self.st.tx_seq,
+            session_id=sid,
+            now_ms=now_ms,
+            flags=flags,
+        )
         self._send(pkt)
         self.st.tx_seq += 1
 
-    def send_set_mode(self, mode: WireControlMode, auto_controller: str = "", ack_req: bool = True) -> None:
+    def send_set_mode(
+        self,
+        mode: WireControlMode,
+        auto_controller: str = "",
+        ack_req: bool = True,
+    ) -> None:
+        """
+        发送 SET_MODE 命令（底层接口）.
+
+        建议在 service 层封装为 request_mode() 再给 TUI 使用。
+        """
         flags = Flags.ACK_REQ if ack_req else Flags(0)
-        pkt = encode_set_mode(seq=self.st.tx_seq, session_id=self.st.session_id, mode=mode, auto_controller=auto_controller, flags=flags)
+        pkt = encode_set_mode(
+            seq=self.st.tx_seq,
+            session_id=self.st.session_id,
+            mode=mode,
+            auto_controller=auto_controller,
+            flags=flags,
+        )
         if ack_req:
             self._pending_ack_seq = self.st.tx_seq
             self._pending_ack_code = None
             self._pending_ack_reason = None
+
         self._send(pkt)
         self.st.tx_seq += 1
+
+    # 兼容性别名：后续可以让上层调用 send_mode()，内部转发到 send_set_mode()
+    def send_mode(
+        self,
+        mode: WireControlMode,
+        auto_controller: str = "",
+        ack_req: bool = True,
+    ) -> None:
+        """兼容别名：内部直接调用 send_set_mode()."""
+        self.send_set_mode(mode=mode, auto_controller=auto_controller, ack_req=ack_req)
 
     def send_set_dof(self, cmd: DofCommand, ack_req: bool = False) -> None:
+        """
+        发送高频 SET_DOF 命令（底层接口）.
+
+        一般不需要 ACK_REQ，避免 ACK 带来额外开销。
+        """
         flags = Flags.ACK_REQ if ack_req else Flags(0)
-        pkt = encode_set_dof(seq=self.st.tx_seq, session_id=self.st.session_id, cmd=cmd, flags=flags)
+        pkt = encode_set_dof(
+            seq=self.st.tx_seq,
+            session_id=self.st.session_id,
+            cmd=cmd,
+            flags=flags,
+        )
         if ack_req:
             self._pending_ack_seq = self.st.tx_seq
             self._pending_ack_code = None
             self._pending_ack_reason = None
+
         self._send(pkt)
         self.st.tx_seq += 1
 
+    # 兼容性别名：send_dof() -> send_set_dof()
+    def send_dof(self, cmd: DofCommand, ack_req: bool = False) -> None:
+        """兼容别名：内部直接调用 send_set_dof()."""
+        self.send_set_dof(cmd=cmd, ack_req=ack_req)
+
     def send_estop(self, enable: bool, ack_req: bool = True) -> None:
+        """
+        发送 ESTOP 命令（带/不带 ACK_REQ）.
+
+        建议上层统一通过 service.request_estop() 调用。
+        """
         flags = Flags.ACK_REQ if ack_req else Flags(0)
-        pkt = encode_estop(seq=self.st.tx_seq, session_id=self.st.session_id, enable=enable, flags=flags)
+        pkt = encode_estop(
+            seq=self.st.tx_seq,
+            session_id=self.st.session_id,
+            enable=enable,
+            flags=flags,
+        )
         if ack_req:
             self._pending_ack_seq = self.st.tx_seq
             self._pending_ack_code = None
             self._pending_ack_reason = None
+
         self._send(pkt)
         self.st.tx_seq += 1
+
+    def send_arm(self, armed: bool, ack_req: bool = True) -> None:
+        """
+        低层 ARM / DISARM 发送接口：
+          - armed=True  => 请求解锁
+          - armed=False => 请求上锁
+        """
+        flags = Flags.ACK_REQ if ack_req else Flags(0)
+        pkt = encode_arm(
+            seq=self.st.tx_seq,
+            session_id=self.st.session_id,
+            armed=armed,
+            flags=flags,
+        )
+        if ack_req:
+            self._pending_ack_seq = self.st.tx_seq
+            self._pending_ack_code = None
+            self._pending_ack_reason = None
+
+        self._send(pkt)
+        self._log(f"[GCS] send_arm armed={int(armed)} seq={self.st.tx_seq}")
+        self.st.tx_seq += 1
+
+    # 兼容上层旧调用：request_arm() -> send_arm()
+    def request_arm(self, armed: bool, ack_req: bool = True) -> None:
+        """
+        上层友好别名（历史原因保留）：
+
+          - 未来建议在 service.py 中实现 GcsService.request_arm()，
+            并让 TUI 仅依赖 service 层；
+          - 这里先保留别名以避免立即破坏现有调用。
+        """
+        self.send_arm(armed=armed, ack_req=ack_req)

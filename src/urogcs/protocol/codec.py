@@ -194,6 +194,7 @@ _HEARTBEAT       = struct.Struct("<I")             # 4
 _SET_MODE        = struct.Struct("<B B H 16s")     # 20 (kAutoNameMaxLen=16)
 _SET_DOF         = struct.Struct("<6f")            # 24
 _ESTOP           = struct.Struct("<B B H")         # 4
+_ARM             = struct.Struct("<B B H")         # 4  ★ 新增：ArmCmd 结构，与 EstopCmd 相同
 
 # C++ AckPayload is ONLY 4 bytes: u16 ack_code, u16 reason. ack_seq is in header.ack_seq.
 _ACK_PAYLOAD     = struct.Struct("<H H")           # 4
@@ -267,6 +268,28 @@ def encode_estop(seq: int, session_id: int, enable: bool, flags: Flags = Flags(0
     h = make_header(MsgType.ESTOP, seq, session_id, flags, len(payload))
     return build_packet(h, payload)
 
+def encode_arm(seq: int,
+               session_id: int,
+               armed: bool,
+               flags: Flags = Flags(0)) -> bytes:
+    """
+    ARM / DISARM 命令编码：
+      - MsgType = ARM (23)
+      - payload: 3 字节
+          [0] = 1 if armed else 0
+          [1] = 0 (保留)
+          [2] = 0 (保留)
+    """
+    payload = _ARM.pack(1 if armed else 0, 0, 0)
+
+    h = make_header(
+        MsgType.ARM,      # ★ 新增的枚举值
+        seq,
+        session_id,
+        flags,
+        len(payload),
+    )
+    return build_packet(h, payload)
 
 def encode_ack(
     seq: int,

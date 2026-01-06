@@ -15,6 +15,15 @@ class DofCommand:
         return [self.surge, self.sway, self.heave, self.roll, self.pitch, self.yaw]
 
 @dataclass
+class EstopCmd:
+    enable: int  # 0/1
+
+
+@dataclass
+class ArmCmd:
+    enable: int  # 0/1，1=arm, 0=disarm
+
+@dataclass
 class StatusTelemetry:
     session_established: int = 0
     link_alive: int = 0
