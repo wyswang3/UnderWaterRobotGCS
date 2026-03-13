@@ -22,6 +22,8 @@ class TelemetryViewModelTests(unittest.TestCase):
                 nav_state=3,
                 nav_stale=0,
                 nav_degraded=1,
+                nav_fault_code=0,
+                nav_status_flags=(1 << 6) | (1 << 7),
                 fault_state=0,
                 health_state=2,
                 command_status=3,
@@ -45,6 +47,10 @@ class TelemetryViewModelTests(unittest.TestCase):
         self.assertTrue(vm.status.armed)
         self.assertEqual(vm.status.mode, "Manual")
         self.assertEqual(vm.status.nav_state, "Ok")
+        self.assertEqual(vm.status.nav_fault_name, "None")
+        self.assertEqual(vm.status.nav_diagnostic_summary, "degraded")
+        self.assertTrue(vm.status.imu_online)
+        self.assertTrue(vm.status.dvl_online)
         self.assertEqual(vm.status.health_state, "Degraded")
         self.assertEqual(vm.status.command_status, "Executed")
         self.assertEqual(vm.status.status_seq, 99)
@@ -63,6 +69,8 @@ class TelemetryViewModelTests(unittest.TestCase):
                 nav_state=1,
                 nav_stale=1,
                 nav_degraded=0,
+                nav_fault_code=12,
+                nav_status_flags=(1 << 10),
                 fault_state=1,
                 health_state=3,
                 command_status=5,
@@ -79,6 +87,8 @@ class TelemetryViewModelTests(unittest.TestCase):
         self.assertIn(AlarmCode.NAV_UNTRUSTED, codes)
         self.assertIn(AlarmCode.SYSTEM_FAULT, codes)
         self.assertIn(AlarmCode.COMMAND_FAILED, codes)
+        nav_alarm = next(alarm for alarm in alarms if alarm.code == AlarmCode.NAV_UNTRUSTED)
+        self.assertIn("imu_reconnecting", nav_alarm.detail)
 
 
 if __name__ == "__main__":

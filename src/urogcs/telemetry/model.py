@@ -9,6 +9,8 @@ from urogcs.protocol.messages import (
     StatusTelemetry,
     command_status_name,
     health_state_name,
+    nav_diagnostic_summary,
+    nav_fault_name,
     runtime_nav_state_name,
     wire_mode_name,
 )
@@ -65,6 +67,30 @@ class TelemetrySnapshot:
     @property
     def nav_degraded(self) -> bool:
         return bool(self.status.nav_degraded) if self.status else False
+
+    @property
+    def nav_fault_code(self) -> int:
+        return int(self.status.nav_fault_code) if self.status else 0
+
+    @property
+    def nav_fault_name(self) -> str:
+        return nav_fault_name(self.nav_fault_code)
+
+    @property
+    def nav_status_flags(self) -> int:
+        return int(self.status.nav_status_flags) if self.status else 0
+
+    @property
+    def nav_diagnostic_summary(self) -> str:
+        if not self.status:
+            return "unknown"
+        return nav_diagnostic_summary(
+            nav_valid=int(self.status.nav_valid),
+            nav_stale=int(self.status.nav_stale),
+            nav_degraded=int(self.status.nav_degraded),
+            nav_fault_code=int(self.status.nav_fault_code),
+            nav_status_flags=int(self.status.nav_status_flags),
+        )
 
     @property
     def nav_state_str(self) -> str:

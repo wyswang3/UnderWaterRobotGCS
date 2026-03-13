@@ -97,6 +97,8 @@ class GcsServiceState:
     nav_state: int = 0
     nav_stale: bool = False
     nav_degraded: bool = False
+    nav_fault_code: int = 0
+    nav_status_flags: int = 0
     fault_state: bool = False
     health_state: int = 0
 
@@ -391,6 +393,8 @@ class GcsService:
         self._state.nav_state = int(getattr(st, "nav_state", 0))
         self._state.nav_stale = bool(getattr(st, "nav_stale", False))
         self._state.nav_degraded = bool(getattr(st, "nav_degraded", False))
+        self._state.nav_fault_code = int(getattr(st, "nav_fault_code", 0))
+        self._state.nav_status_flags = int(getattr(st, "nav_status_flags", 0))
         self._state.fault_state = bool(getattr(st, "fault_state", False))
         self._state.health_state = int(getattr(st, "health_state", 0))
 

@@ -45,6 +45,8 @@ class TuiStatusSnapshot:
     nav_state: str = "Unknown"
     nav_stale: int = 0
     nav_degraded: int = 0
+    nav_fault_name: str = "None"
+    nav_diag_summary: str = "unknown"
     health_state: str = "Unknown"
     fault_state: int = 0
     last_fault_code: int = 0
@@ -143,7 +145,8 @@ class TuiDashboard:
             f"[NAV] valid={int(snap.nav_valid)} state={snap.nav_state} "
             f"stale={int(snap.nav_stale)} degraded={int(snap.nav_degraded)} "
             f"health={snap.health_state} fault={int(snap.fault_state)} "
-            f"code={snap.last_fault_code}"
+            f"nav_fault={snap.nav_fault_name} code={snap.last_fault_code} "
+            f"diag={snap.nav_diag_summary}"
         )
 
         sent = "-"

@@ -63,6 +63,107 @@ def command_status_name(code: int) -> str:
     }.get(int(code), "Unknown")
 
 
+NAV_FLAG_NONE = 0
+NAV_FLAG_IMU_OK = 1 << 0
+NAV_FLAG_DVL_OK = 1 << 1
+NAV_FLAG_DEPTH_OK = 1 << 2
+NAV_FLAG_USBL_OK = 1 << 3
+NAV_FLAG_ESKF_OK = 1 << 4
+NAV_FLAG_ALIGN_DONE = 1 << 5
+NAV_FLAG_IMU_DEVICE_ONLINE = 1 << 6
+NAV_FLAG_DVL_DEVICE_ONLINE = 1 << 7
+NAV_FLAG_IMU_BIND_MISMATCH = 1 << 8
+NAV_FLAG_DVL_BIND_MISMATCH = 1 << 9
+NAV_FLAG_IMU_RECONNECTING = 1 << 10
+NAV_FLAG_DVL_RECONNECTING = 1 << 11
+
+
+def nav_fault_name(code: int) -> str:
+    return {
+        0: "None",
+        1: "EstimatorUninitialized",
+        2: "AlignmentPending",
+        3: "ImuNoData",
+        4: "ImuStale",
+        5: "DepthStale",
+        6: "EstimatorNumericInvalid",
+        7: "NavOutputStale",
+        8: "NavViewStale",
+        9: "NoData",
+        10: "ImuDeviceNotFound",
+        11: "ImuDeviceMismatch",
+        12: "ImuDisconnected",
+        13: "DvlDeviceNotFound",
+        14: "DvlDeviceMismatch",
+        15: "DvlDisconnected",
+    }.get(int(code), f"Unknown({int(code)})")
+
+
+def nav_flag_has(flags: int, flag: int) -> bool:
+    return (int(flags) & int(flag)) != 0
+
+
+def nav_diagnostic_tags(
+    *,
+    nav_valid: int,
+    nav_stale: int,
+    nav_degraded: int,
+    nav_fault_code: int,
+    nav_status_flags: int,
+) -> List[str]:
+    """Collapse authoritative nav fault/state bits into stable UI filter tags."""
+    tags: List[str] = []
+    flags = int(nav_status_flags)
+    fault_code = int(nav_fault_code)
+
+    if int(nav_stale):
+        tags.append("stale")
+    if not int(nav_valid):
+        tags.append("invalid")
+    elif int(nav_degraded):
+        tags.append("degraded")
+
+    if nav_flag_has(flags, NAV_FLAG_IMU_BIND_MISMATCH):
+        tags.append("imu_mismatch")
+    elif nav_flag_has(flags, NAV_FLAG_IMU_RECONNECTING):
+        tags.append("imu_reconnecting")
+    elif fault_code in (10, 12):
+        tags.append("imu_offline")
+
+    if nav_flag_has(flags, NAV_FLAG_DVL_BIND_MISMATCH):
+        tags.append("dvl_mismatch")
+    elif nav_flag_has(flags, NAV_FLAG_DVL_RECONNECTING):
+        tags.append("dvl_reconnecting")
+    elif fault_code in (13, 15):
+        tags.append("dvl_offline")
+
+    if fault_code not in (0, 10, 11, 12, 13, 14, 15):
+        tags.append(nav_fault_name(fault_code))
+
+    if not tags:
+        tags.append("ok")
+    return tags
+
+
+def nav_diagnostic_summary(
+    *,
+    nav_valid: int,
+    nav_stale: int,
+    nav_degraded: int,
+    nav_fault_code: int,
+    nav_status_flags: int,
+) -> str:
+    """Return the compact diagnosis string shown in TUI/UI status rows."""
+    tags = nav_diagnostic_tags(
+        nav_valid=nav_valid,
+        nav_stale=nav_stale,
+        nav_degraded=nav_degraded,
+        nav_fault_code=nav_fault_code,
+        nav_status_flags=nav_status_flags,
+    )
+    return ",".join(tags)
+
+
 @dataclass
 class StatusTelemetry:
     session_established: int = 0
@@ -80,6 +181,8 @@ class StatusTelemetry:
     command_status: int = 0
     last_fault_code: int = 0
     command_fault_code: int = 0
+    nav_fault_code: int = 0
+    nav_status_flags: int = 0
     active_controller: str = ""
     desired_controller: str = ""
     consecutive_failures: int = 0
@@ -103,6 +206,44 @@ class StatusTelemetry:
     @property
     def command_status_name(self) -> str:
         return command_status_name(self.command_status)
+
+    @property
+    def nav_fault_name(self) -> str:
+        return nav_fault_name(self.nav_fault_code)
+
+    @property
+    def imu_online(self) -> bool:
+        return nav_flag_has(self.nav_status_flags, NAV_FLAG_IMU_DEVICE_ONLINE)
+
+    @property
+    def dvl_online(self) -> bool:
+        return nav_flag_has(self.nav_status_flags, NAV_FLAG_DVL_DEVICE_ONLINE)
+
+    @property
+    def imu_reconnecting(self) -> bool:
+        return nav_flag_has(self.nav_status_flags, NAV_FLAG_IMU_RECONNECTING)
+
+    @property
+    def dvl_reconnecting(self) -> bool:
+        return nav_flag_has(self.nav_status_flags, NAV_FLAG_DVL_RECONNECTING)
+
+    @property
+    def imu_mismatch(self) -> bool:
+        return nav_flag_has(self.nav_status_flags, NAV_FLAG_IMU_BIND_MISMATCH)
+
+    @property
+    def dvl_mismatch(self) -> bool:
+        return nav_flag_has(self.nav_status_flags, NAV_FLAG_DVL_BIND_MISMATCH)
+
+    @property
+    def nav_diagnostic_summary(self) -> str:
+        return nav_diagnostic_summary(
+            nav_valid=self.nav_valid,
+            nav_stale=self.nav_stale,
+            nav_degraded=self.nav_degraded,
+            nav_fault_code=self.nav_fault_code,
+            nav_status_flags=self.nav_status_flags,
+        )
 
 def clamp_cstr(s: str, cap: int) -> bytes:
     b = (s or "").encode("utf-8", errors="ignore")

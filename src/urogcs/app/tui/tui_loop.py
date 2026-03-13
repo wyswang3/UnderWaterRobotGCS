@@ -24,6 +24,8 @@ from urogcs.protocol.messages import (
     DofCommand,
     command_status_name,
     health_state_name,
+    nav_diagnostic_summary,
+    nav_fault_name,
     runtime_nav_state_name,
     wire_mode_name,
 )
@@ -307,6 +309,14 @@ def run_tui(cfg: TuiConfig) -> int:
                         nav_state=runtime_nav_state_name(st.nav_state),
                         nav_stale=int(st.nav_stale),
                         nav_degraded=int(st.nav_degraded),
+                        nav_fault_name=nav_fault_name(st.nav_fault_code),
+                        nav_diag_summary=nav_diagnostic_summary(
+                            nav_valid=int(st.nav_valid),
+                            nav_stale=int(st.nav_stale),
+                            nav_degraded=int(st.nav_degraded),
+                            nav_fault_code=int(st.nav_fault_code),
+                            nav_status_flags=int(st.nav_status_flags),
+                        ),
                         health_state=health_state_name(st.health_state),
                         fault_state=int(st.fault_state),
                         last_fault_code=st.last_fault_code,

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
 
+from urogcs.protocol.messages import nav_diagnostic_summary
 from urogcs.telemetry.model import TelemetrySnapshot
 
 
@@ -113,21 +114,35 @@ def evaluate_alarms(snapshot: TelemetrySnapshot, now_ns: int, policy: AlarmPolic
         ))
 
     if (not bool(getattr(st, "nav_valid", False))) or bool(getattr(st, "nav_stale", False)):
+        diag = nav_diagnostic_summary(
+            nav_valid=int(getattr(st, "nav_valid", 0)),
+            nav_stale=int(getattr(st, "nav_stale", 0)),
+            nav_degraded=int(getattr(st, "nav_degraded", 0)),
+            nav_fault_code=int(getattr(st, "nav_fault_code", 0)),
+            nav_status_flags=int(getattr(st, "nav_status_flags", 0)),
+        )
         out.append(Alarm(
             code=AlarmCode.NAV_UNTRUSTED,
             level=AlarmLevel.CRIT,
             title="Navigation not trusted",
             detail=(
                 "nav_valid/nav_stale indicates the current navigation snapshot must "
-                "not be treated as a trusted control input."
+                f"not be treated as a trusted control input. diag={diag}."
             ),
         ))
     elif bool(getattr(st, "nav_degraded", False)):
+        diag = nav_diagnostic_summary(
+            nav_valid=int(getattr(st, "nav_valid", 0)),
+            nav_stale=int(getattr(st, "nav_stale", 0)),
+            nav_degraded=int(getattr(st, "nav_degraded", 0)),
+            nav_fault_code=int(getattr(st, "nav_fault_code", 0)),
+            nav_status_flags=int(getattr(st, "nav_status_flags", 0)),
+        )
         out.append(Alarm(
             code=AlarmCode.NAV_UNTRUSTED,
             level=AlarmLevel.WARN,
             title="Navigation degraded",
-            detail="nav_degraded=1. Control may keep running in a limited mode only.",
+            detail=f"nav_degraded=1 diag={diag}. Control may keep running in a limited mode only.",
         ))
 
     if bool(getattr(st, "fault_state", False)) or int(getattr(st, "health_state", 0)) == 3:

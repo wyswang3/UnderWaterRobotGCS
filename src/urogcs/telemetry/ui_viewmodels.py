@@ -27,6 +27,16 @@ class StatusViewModel:
     nav_state: str
     nav_stale: bool
     nav_degraded: bool
+    nav_fault_code: int
+    nav_fault_name: str
+    nav_status_flags: int
+    nav_diagnostic_summary: str
+    imu_online: bool
+    dvl_online: bool
+    imu_reconnecting: bool
+    dvl_reconnecting: bool
+    imu_mismatch: bool
+    dvl_mismatch: bool
     health_state: str
     fault_state: bool
     command_status: str
@@ -90,6 +100,16 @@ def build_dashboard_viewmodel(
         nav_state=snapshot.nav_state_str,
         nav_stale=bool(st.nav_stale),
         nav_degraded=bool(st.nav_degraded),
+        nav_fault_code=int(st.nav_fault_code),
+        nav_fault_name=st.nav_fault_name,
+        nav_status_flags=int(st.nav_status_flags),
+        nav_diagnostic_summary=st.nav_diagnostic_summary,
+        imu_online=st.imu_online,
+        dvl_online=st.dvl_online,
+        imu_reconnecting=st.imu_reconnecting,
+        dvl_reconnecting=st.dvl_reconnecting,
+        imu_mismatch=st.imu_mismatch,
+        dvl_mismatch=st.dvl_mismatch,
         health_state=snapshot.health_state_str,
         fault_state=bool(st.fault_state),
         command_status=snapshot.command_status_str,
