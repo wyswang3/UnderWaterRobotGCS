@@ -20,7 +20,13 @@ tui_loop.py
 
 import time
 
-from urogcs.protocol.messages import DofCommand
+from urogcs.protocol.messages import (
+    DofCommand,
+    command_status_name,
+    health_state_name,
+    runtime_nav_state_name,
+    wire_mode_name,
+)
 from urogcs.protocol.wire import WireControlMode
 from urogcs.control.keyboard_mapper import KeyboardMapper
 
@@ -50,12 +56,10 @@ def run_tui(cfg: TuiConfig) -> int:
     # ----------------------------
     # 1. 会话 & 状态回调
     # ----------------------------
-    last_status = None        # gateway STATUS Telemetry（可能为 None）
     last_log_line = ""        # 最近一条日志文本
 
-    def on_status(st):
-        nonlocal last_status
-        last_status = st
+    def on_status(_st):
+        return None
 
     def on_log(msg: str):
         nonlocal last_log_line
@@ -97,9 +101,7 @@ def run_tui(cfg: TuiConfig) -> int:
     current_mode = WireControlMode.Manual
     raw_cmd = DofCommand()
 
-    # ★ 本地“ARM 状态感知”（仅用于提示，不参与真正安全裁决）
-    armed_local = False
-    last_arm_log_ns = 0  # ARM 提示限流
+    last_arm_log_ns = 0  # 未解锁提醒限流
 
     # 键盘错误日志限流（避免刷屏）
     last_kb_error_msg = ""
@@ -180,12 +182,10 @@ def run_tui(cfg: TuiConfig) -> int:
                 # --- 5.3.4 Arm / Disarm / Center / Help ---
                 if actions.arm:
                     svc.request_arm(True, ack_req=True)
-                    armed_local = True
                     on_log("[KB] Arm requested (sent to gateway)")
 
                 if actions.disarm:
                     svc.request_arm(False, ack_req=True)
-                    armed_local = False
                     on_log("[KB] Disarm requested (sent to gateway)")
 
                 if actions.center:
@@ -247,8 +247,11 @@ def run_tui(cfg: TuiConfig) -> int:
                         next_send_ns += send_period_ns
 
                     # 若本地认为未 ARM，则低频提醒操作者，但仍然把“意图”发下去。
-                    if not armed_local and now - last_arm_log_ns > 2 * 1_000_000_000:
-                        on_log("[KB] ROV not armed (press ',' to ARM) — DOF may be ignored downstream.")
+                    if not svc.state.armed and now - last_arm_log_ns > 2 * 1_000_000_000:
+                        on_log(
+                            "[KB] ROV not armed per remote STATUS (press ',' to ARM) "
+                            "— DOF may be ignored downstream."
+                        )
                         last_arm_log_ns = now
 
                     on_log(
@@ -271,25 +274,52 @@ def run_tui(cfg: TuiConfig) -> int:
 
                     # 从 GcsServiceState + Telemetry 中提取关键信息
                     st = svc.state
+                    status_age_ms = None
+                    if st.last_status_rx_ns > 0:
+                        status_age_ms = (now - st.last_status_rx_ns) / 1_000_000.0
 
-                    sess_est = int(st.session_established)
-                    link_alive = int(st.link_alive)
-                    remote_estop = int(getattr(last_status, "estop", 0)) if last_status is not None else 0
-                    remote_mode = int(getattr(last_status, "mode", 0)) if last_status is not None else 0
-                    active_ctl = st.active_controller
-                    desired_ctl = st.desired_controller
+                    ack_code = st.last_ack_code
+                    ack_code_str = ""
+                    if ack_code is not None:
+                        try:
+                            from urogcs.protocol.wire import AckCode
+
+                            ack_code_str = AckCode(int(ack_code)).name
+                        except Exception:
+                            ack_code_str = str(ack_code)
 
                     snap = TuiStatusSnapshot(
-                        estop=bool(estop_latched),
-                        mode=current_mode,
+                        local_estop=bool(estop_latched),
+                        local_mode=current_mode,
                         throttle=throttle,
                         cmd=raw_cmd,
-                        session_established=sess_est,
-                        link_alive=link_alive,
-                        estop_from_remote=remote_estop,
-                        mode_from_remote=remote_mode,
-                        active_controller=active_ctl,
-                        desired_controller=desired_ctl,
+                        session_established=int(st.session_established),
+                        link_alive=int(st.link_alive),
+                        status_age_ms=status_age_ms,
+                        status_seq=st.status_seq,
+                        remote_armed=int(st.armed),
+                        remote_estop=int(st.estop),
+                        remote_mode=wire_mode_name(st.mode),
+                        remote_failsafe=int(st.failsafe_active),
+                        active_controller=st.active_controller,
+                        desired_controller=st.desired_controller,
+                        nav_valid=int(st.nav_valid),
+                        nav_state=runtime_nav_state_name(st.nav_state),
+                        nav_stale=int(st.nav_stale),
+                        nav_degraded=int(st.nav_degraded),
+                        health_state=health_state_name(st.health_state),
+                        fault_state=int(st.fault_state),
+                        last_fault_code=st.last_fault_code,
+                        command_status=command_status_name(st.command_status),
+                        command_cmd_seq=st.command_cmd_seq,
+                        last_tx_kind=st.last_tx_kind,
+                        last_tx_seq=st.last_tx_seq,
+                        waiting_ack=st.waiting_ack,
+                        pending_ack_seq=st.pending_ack_seq,
+                        pending_ack_kind=st.pending_ack_kind,
+                        last_ack_kind=st.last_ack_kind,
+                        last_ack_code=ack_code_str,
+                        last_ack_reason=st.last_ack_reason,
                         rov_ip=cfg.rov_ip,
                         rov_port=cfg.rov_port,
                         bind_ip=cfg.bind_ip,

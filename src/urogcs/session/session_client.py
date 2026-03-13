@@ -162,6 +162,14 @@ class GcsSessionClient:
         self._pending_ack_seq: Optional[int] = None
         self._pending_ack_code: Optional[AckCode] = None
         self._pending_ack_reason: Optional[int] = None
+        self._pending_ack_kind: str = ""
+        self._last_tx_seq: Optional[int] = None
+        self._last_tx_kind: str = ""
+        self._last_tx_time_ns: int = 0
+        self._last_ack_seq: Optional[int] = None
+        self._last_ack_code: Optional[AckCode] = None
+        self._last_ack_reason: Optional[int] = None
+        self._last_ack_kind: str = ""
 
         self._log(
             f"[INIT] bind={self.bind_addr[0]}:{self.bind_addr[1]} "
@@ -191,6 +199,46 @@ class GcsSessionClient:
         """最近一次收到并成功 decode 的 STATUS 报文."""
         return self._last_status
 
+    @property
+    def last_tx_seq(self) -> Optional[int]:
+        return self._last_tx_seq
+
+    @property
+    def last_tx_kind(self) -> str:
+        return self._last_tx_kind
+
+    @property
+    def last_tx_time_ns(self) -> int:
+        return self._last_tx_time_ns
+
+    @property
+    def waiting_ack(self) -> bool:
+        return self._pending_ack_seq is not None and self._pending_ack_code is None
+
+    @property
+    def pending_ack_seq(self) -> Optional[int]:
+        return self._pending_ack_seq if self.waiting_ack else None
+
+    @property
+    def pending_ack_kind(self) -> str:
+        return self._pending_ack_kind if self.waiting_ack else ""
+
+    @property
+    def last_ack_seq(self) -> Optional[int]:
+        return self._last_ack_seq
+
+    @property
+    def last_ack_kind(self) -> str:
+        return self._last_ack_kind
+
+    @property
+    def last_ack_code(self) -> Optional[int]:
+        return int(self._last_ack_code) if self._last_ack_code is not None else None
+
+    @property
+    def last_ack_reason(self) -> Optional[int]:
+        return self._last_ack_reason
+
     # -------------------------------------------------------------------------
     # logging helpers
     # -------------------------------------------------------------------------
@@ -214,6 +262,17 @@ class GcsSessionClient:
         """记录并打印错误（会更新 last_error）."""
         self.last_error = s
         self._log(s)
+
+    def _record_command_tx(self, kind: str, seq: int) -> None:
+        """
+        Track the latest operator-visible command transmission.
+
+        This intentionally excludes heartbeats to keep UI feedback aligned with
+        discrete operator actions such as ESTOP / ARM / SET_MODE.
+        """
+        self._last_tx_seq = int(seq)
+        self._last_tx_kind = kind
+        self._last_tx_time_ns = time.monotonic_ns()
 
     # -------------------------------------------------------------------------
     # transport
@@ -306,6 +365,10 @@ class GcsSessionClient:
         if self._pending_ack_seq is not None and int(ack_seq) == int(self._pending_ack_seq):
             self._pending_ack_code = code
             self._pending_ack_reason = int(reason)
+            self._last_ack_seq = int(ack_seq)
+            self._last_ack_code = code
+            self._last_ack_reason = int(reason)
+            self._last_ack_kind = self._pending_ack_kind
             self._log(f"[RX][ACK] matched pending ack_seq={ack_seq} code={code.name}")
 
     def _status_indicates_established(self) -> bool:
@@ -403,7 +466,15 @@ class GcsSessionClient:
         self._pending_ack_seq = None
         self._pending_ack_code = None
         self._pending_ack_reason = None
+        self._pending_ack_kind = ""
         self._last_status = None
+        self._last_tx_seq = None
+        self._last_tx_kind = ""
+        self._last_tx_time_ns = 0
+        self._last_ack_seq = None
+        self._last_ack_code = None
+        self._last_ack_reason = None
+        self._last_ack_kind = ""
 
         # client nonce
         self.st.gcs_nonce = int.from_bytes(os.urandom(8), "little")
@@ -494,6 +565,7 @@ class GcsSessionClient:
         self._pending_ack_seq = int(confirm_seq)
         self._pending_ack_code = None
         self._pending_ack_reason = None
+        self._pending_ack_kind = "CONNECT_CONFIRM"
 
         self._send(pkt2)
         self._log(
@@ -573,10 +645,12 @@ class GcsSessionClient:
             auto_controller=auto_controller,
             flags=flags,
         )
+        self._record_command_tx("SET_MODE", self.st.tx_seq)
         if ack_req:
             self._pending_ack_seq = self.st.tx_seq
             self._pending_ack_code = None
             self._pending_ack_reason = None
+            self._pending_ack_kind = "SET_MODE"
 
         self._send(pkt)
         self.st.tx_seq += 1
@@ -608,6 +682,7 @@ class GcsSessionClient:
             self._pending_ack_seq = self.st.tx_seq
             self._pending_ack_code = None
             self._pending_ack_reason = None
+            self._pending_ack_kind = "SET_DOF"
 
         self._send(pkt)
         self.st.tx_seq += 1
@@ -630,10 +705,12 @@ class GcsSessionClient:
             enable=enable,
             flags=flags,
         )
+        self._record_command_tx("ESTOP", self.st.tx_seq)
         if ack_req:
             self._pending_ack_seq = self.st.tx_seq
             self._pending_ack_code = None
             self._pending_ack_reason = None
+            self._pending_ack_kind = "ESTOP"
 
         self._send(pkt)
         self.st.tx_seq += 1
@@ -651,10 +728,12 @@ class GcsSessionClient:
             armed=armed,
             flags=flags,
         )
+        self._record_command_tx("ARM", self.st.tx_seq)
         if ack_req:
             self._pending_ack_seq = self.st.tx_seq
             self._pending_ack_code = None
             self._pending_ack_reason = None
+            self._pending_ack_kind = "ARM"
 
         self._send(pkt)
         self._log(f"[GCS] send_arm armed={int(armed)} seq={self.st.tx_seq}")

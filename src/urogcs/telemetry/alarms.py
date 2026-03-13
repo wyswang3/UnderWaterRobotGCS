@@ -18,6 +18,10 @@ class AlarmCode(str, Enum):
     SESSION_NOT_ESTABLISHED = "SESSION_NOT_ESTABLISHED"
     LINK_STALE = "LINK_STALE"
     ESTOP_ACTIVE = "ESTOP_ACTIVE"
+    FAILSAFE_ACTIVE = "FAILSAFE_ACTIVE"
+    NAV_UNTRUSTED = "NAV_UNTRUSTED"
+    SYSTEM_FAULT = "SYSTEM_FAULT"
+    COMMAND_FAILED = "COMMAND_FAILED"
     FAIL_COUNTER_GROWING = "FAIL_COUNTER_GROWING"
 
 
@@ -98,6 +102,51 @@ def evaluate_alarms(snapshot: TelemetrySnapshot, now_ns: int, policy: AlarmPolic
             level=AlarmLevel.CRIT,
             title="E-Stop active",
             detail="Vehicle reports ESTOP=1. Clear estop to resume thrusters.",
+        ))
+
+    if bool(getattr(st, "failsafe_active", False)):
+        out.append(Alarm(
+            code=AlarmCode.FAILSAFE_ACTIVE,
+            level=AlarmLevel.CRIT,
+            title="Failsafe active",
+            detail="Control core reports failsafe_active=1. Inspect nav/link/guard state.",
+        ))
+
+    if (not bool(getattr(st, "nav_valid", False))) or bool(getattr(st, "nav_stale", False)):
+        out.append(Alarm(
+            code=AlarmCode.NAV_UNTRUSTED,
+            level=AlarmLevel.CRIT,
+            title="Navigation not trusted",
+            detail=(
+                "nav_valid/nav_stale indicates the current navigation snapshot must "
+                "not be treated as a trusted control input."
+            ),
+        ))
+    elif bool(getattr(st, "nav_degraded", False)):
+        out.append(Alarm(
+            code=AlarmCode.NAV_UNTRUSTED,
+            level=AlarmLevel.WARN,
+            title="Navigation degraded",
+            detail="nav_degraded=1. Control may keep running in a limited mode only.",
+        ))
+
+    if bool(getattr(st, "fault_state", False)) or int(getattr(st, "health_state", 0)) == 3:
+        out.append(Alarm(
+            code=AlarmCode.SYSTEM_FAULT,
+            level=AlarmLevel.CRIT,
+            title="System fault active",
+            detail=f"fault_state={int(getattr(st, 'fault_state', 0))} fault_code={int(getattr(st, 'last_fault_code', 0))}.",
+        ))
+
+    if int(getattr(st, "command_status", 0)) in (2, 4, 5):
+        out.append(Alarm(
+            code=AlarmCode.COMMAND_FAILED,
+            level=AlarmLevel.WARN,
+            title="Last command not applied",
+            detail=(
+                "Telemetry reports command_status="
+                f"{int(getattr(st, 'command_status', 0))} fault_code={int(getattr(st, 'command_fault_code', 0))}."
+            ),
         ))
 
     # 4) Failure counters (from your wire telemetry)

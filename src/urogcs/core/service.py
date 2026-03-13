@@ -13,6 +13,7 @@ GCS 核心服务层：
 """
 
 from dataclasses import dataclass
+import time
 from typing import Any, Callable, Optional
 
 from urogcs.session.session_client import GcsSessionClient
@@ -86,12 +87,45 @@ class GcsServiceState:
     link_alive: bool = False
 
     # 安全 / 模式
+    armed: bool = False
     estop: bool = False
     mode: int = 0  # WireControlMode 的数值，UI 可通过表映射为名称
+    failsafe_active: bool = False
+
+    # 导航 / 健康
+    nav_valid: bool = False
+    nav_state: int = 0
+    nav_stale: bool = False
+    nav_degraded: bool = False
+    fault_state: bool = False
+    health_state: int = 0
+
+    # 最新命令执行结果（来自 TelemetryFrameV2 权威运行态）
+    command_status: int = 0
+    last_fault_code: int = 0
+    command_fault_code: int = 0
+    status_seq: int = 0
+    command_cmd_seq: int = 0
+    t_ns: int = 0
+    last_status_rx_ns: int = 0
 
     # 控制器信息
     active_controller: str = ""
     desired_controller: str = ""
+    consecutive_failures: int = 0
+    auto_fail_limit: int = 0
+
+    # 本地发送 / 传输 ACK 状态（供 UI 区分 sent / acked）
+    last_tx_seq: Optional[int] = None
+    last_tx_kind: str = ""
+    last_tx_ns: int = 0
+    waiting_ack: bool = False
+    pending_ack_seq: Optional[int] = None
+    pending_ack_kind: str = ""
+    last_ack_seq: Optional[int] = None
+    last_ack_kind: str = ""
+    last_ack_code: Optional[int] = None
+    last_ack_reason: Optional[int] = None
 
     # 最新一份底层 status（透传给对协议细节感兴趣的上层）
     last_status_raw: Optional[Any] = None
@@ -204,6 +238,7 @@ class GcsService:
                 self.last_error = "[HS] handshake failed (unknown reason)"
             self._handle_log(self.last_error)
 
+        self._refresh_client_state()
         return ok
 
     def close(self) -> None:
@@ -220,6 +255,9 @@ class GcsService:
         # 会话关闭后，把关键状态重置（保留 last_status_raw 可选）
         self._state.session_established = False
         self._state.link_alive = False
+        self._state.waiting_ack = False
+        self._state.pending_ack_seq = None
+        self._state.pending_ack_kind = ""
 
     # -------------------------------------------------------------------------
     # 调度相关（供主循环调用）
@@ -235,6 +273,7 @@ class GcsService:
             return
         try:
             self._cli.poll(max_packets=max_packets)
+            self._refresh_client_state()
         except Exception as e:  # noqa: BLE001
             self._handle_log(f"[POLL] exception: {e}")
 
@@ -265,6 +304,7 @@ class GcsService:
             return
         try:
             self._cli.send_estop(latched, ack_req=ack_req)
+            self._refresh_client_state()
         except Exception as e:  # noqa: BLE001
             self._handle_log(f"[TX] ESTOP failed: {e}")
 
@@ -281,6 +321,7 @@ class GcsService:
             # 底层真正发 UDP 报文的是 GcsSessionClient.send_arm()
             self._handle_log(f"[GCS] request_arm enable={int(armed)}")
             self._cli.send_arm(armed, ack_req=ack_req)
+            self._refresh_client_state()
         except Exception as e:  # noqa: BLE001
             self._handle_log(f"[TX] ARM failed: {e}")
 
@@ -302,6 +343,7 @@ class GcsService:
         try:
             # 底层目前实现为 send_set_mode()，未来如改名 send_mode() 也可透明替换
             self._cli.send_set_mode(mode, auto_controller=auto_controller, ack_req=ack_req)
+            self._refresh_client_state()
         except Exception as e:  # noqa: BLE001
             self._handle_log(f"[TX] SET_MODE failed: {e}")
 
@@ -317,6 +359,7 @@ class GcsService:
             return
         try:
             self._cli.send_set_dof(cmd, ack_req=ack_req)
+            self._refresh_client_state()
         except Exception as e:  # noqa: BLE001
             self._handle_log(f"[TX] SET_DOF failed: {e}")
 
@@ -333,17 +376,37 @@ class GcsService:
         - 转发给上层 on_status 回调（如果有）。
         """
         self._state.last_status_raw = st
+        self._state.last_status_rx_ns = time.monotonic_ns()
 
         # 尝试从 st 上提炼常用字段（全部使用 getattr + 默认值，避免协议变更导致崩溃）
         self._state.session_established = bool(getattr(st, "session_established", False))
-        self._state.session_id = getattr(st, "session_id", None)
         self._state.link_alive = bool(getattr(st, "link_alive", False))
 
+        self._state.armed = bool(getattr(st, "armed", False))
         self._state.estop = bool(getattr(st, "estop", False))
         self._state.mode = int(getattr(st, "mode", 0))
+        self._state.failsafe_active = bool(getattr(st, "failsafe_active", False))
+
+        self._state.nav_valid = bool(getattr(st, "nav_valid", False))
+        self._state.nav_state = int(getattr(st, "nav_state", 0))
+        self._state.nav_stale = bool(getattr(st, "nav_stale", False))
+        self._state.nav_degraded = bool(getattr(st, "nav_degraded", False))
+        self._state.fault_state = bool(getattr(st, "fault_state", False))
+        self._state.health_state = int(getattr(st, "health_state", 0))
+
+        self._state.command_status = int(getattr(st, "command_status", 0))
+        self._state.last_fault_code = int(getattr(st, "last_fault_code", 0))
+        self._state.command_fault_code = int(getattr(st, "command_fault_code", 0))
+        self._state.status_seq = int(getattr(st, "status_seq", 0))
+        self._state.command_cmd_seq = int(getattr(st, "command_cmd_seq", 0))
+        self._state.t_ns = int(getattr(st, "t_ns", 0))
 
         self._state.active_controller = str(getattr(st, "active_controller", "") or "")
         self._state.desired_controller = str(getattr(st, "desired_controller", "") or "")
+        self._state.consecutive_failures = int(getattr(st, "consecutive_failures", 0))
+        self._state.auto_fail_limit = int(getattr(st, "auto_fail_limit", 0))
+
+        self._refresh_client_state()
 
         if self._user_on_status is not None:
             try:
@@ -351,6 +414,28 @@ class GcsService:
             except Exception as e:  # noqa: BLE001
                 # 不让 UI 回调异常影响底层逻辑
                 self._handle_log(f"[CB] on_status raised: {e}")
+
+    def _refresh_client_state(self) -> None:
+        """Mirror local session/ACK state into the UI-facing service snapshot."""
+        if self._cli is None:
+            return
+
+        cli_state = self._cli.state
+        if getattr(cli_state, "session_id", 0):
+            self._state.session_id = int(cli_state.session_id)
+        if getattr(cli_state, "established", False):
+            self._state.session_established = True
+
+        self._state.last_tx_seq = self._cli.last_tx_seq
+        self._state.last_tx_kind = self._cli.last_tx_kind
+        self._state.last_tx_ns = self._cli.last_tx_time_ns
+        self._state.waiting_ack = self._cli.waiting_ack
+        self._state.pending_ack_seq = self._cli.pending_ack_seq
+        self._state.pending_ack_kind = self._cli.pending_ack_kind
+        self._state.last_ack_seq = self._cli.last_ack_seq
+        self._state.last_ack_kind = self._cli.last_ack_kind
+        self._state.last_ack_code = self._cli.last_ack_code
+        self._state.last_ack_reason = self._cli.last_ack_reason
 
     def _handle_log(self, msg: str) -> None:
         """

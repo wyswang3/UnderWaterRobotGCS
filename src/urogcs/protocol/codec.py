@@ -199,9 +199,13 @@ _ARM             = struct.Struct("<B B H")         # 4  ★ 新增：ArmCmd 结�
 # C++ AckPayload is ONLY 4 bytes: u16 ack_code, u16 reason. ack_seq is in header.ack_seq.
 _ACK_PAYLOAD     = struct.Struct("<H H")           # 4
 
-# StatusTelemetry:
-# <4B 2B H 16s 16s I I Q> = 4 + 2 + 2 + 16 + 16 + 4 + 4 + 8 = 64 bytes
-_STATUS          = struct.Struct("<4B 2B H 16s 16s I I Q")  # 64
+# StatusTelemetry legacy layout:
+# <4B 2B H 16s 16s I I Q> = 56 bytes
+_STATUS_LEGACY   = struct.Struct("<4B 2B H 16s 16s I I Q")  # 56
+
+# StatusTelemetry current layout (must match C++ proto_gcs::StatusTelemetry):
+# <14B H H H I I I Q 16s 16s Q> = 80 bytes
+_STATUS_V1       = struct.Struct("<14B H H H I I I Q 16s 16s Q")  # 80
 
 
 # =============================================================================
@@ -322,14 +326,57 @@ def decode_ack(hdr: PacketHeader, payload: bytes) -> Tuple[int, int, int]:
 
 
 def decode_status(payload: bytes) -> StatusTelemetry:
-    if len(payload) != _STATUS.size:
-        raise ValueError(f"STATUS payload size mismatch: {len(payload)} != {_STATUS.size}")
+    if len(payload) == _STATUS_V1.size:
+        (session_established, link_alive, estop, armed,
+         mode, failsafe_active, nav_valid, nav_state,
+         nav_stale, nav_degraded, fault_state, health_state,
+         command_status, _reserved0,
+         last_fault_code,
+         command_fault_code, _reserved1,
+         consecutive_failures, auto_fail_limit, status_seq,
+         command_cmd_seq,
+         active16, desired16,
+         t_ns) = _STATUS_V1.unpack(payload)
+
+        def cstr(bs: bytes) -> str:
+            return bs.split(b"\x00", 1)[0].decode("utf-8", errors="ignore")
+
+        return StatusTelemetry(
+            session_established=int(session_established),
+            link_alive=int(link_alive),
+            estop=int(estop),
+            armed=int(armed),
+            mode=int(mode),
+            failsafe_active=int(failsafe_active),
+            nav_valid=int(nav_valid),
+            nav_state=int(nav_state),
+            nav_stale=int(nav_stale),
+            nav_degraded=int(nav_degraded),
+            fault_state=int(fault_state),
+            health_state=int(health_state),
+            command_status=int(command_status),
+            last_fault_code=int(last_fault_code),
+            command_fault_code=int(command_fault_code),
+            active_controller=cstr(active16),
+            desired_controller=cstr(desired16),
+            consecutive_failures=int(consecutive_failures),
+            auto_fail_limit=int(auto_fail_limit),
+            status_seq=int(status_seq),
+            command_cmd_seq=int(command_cmd_seq),
+            t_ns=int(t_ns),
+        )
+
+    if len(payload) != _STATUS_LEGACY.size:
+        raise ValueError(
+            "STATUS payload size mismatch: "
+            f"{len(payload)} not in ({_STATUS_LEGACY.size}, {_STATUS_V1.size})"
+        )
 
     (session_established, link_alive, estop, _r0,
      mode, _r1, _r2,
      active16, desired16,
      consecutive_failures, auto_fail_limit,
-     t_ns) = _STATUS.unpack(payload)
+     t_ns) = _STATUS_LEGACY.unpack(payload)
 
     def cstr(bs: bytes) -> str:
         return bs.split(b"\x00", 1)[0].decode("utf-8", errors="ignore")

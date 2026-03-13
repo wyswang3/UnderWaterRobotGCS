@@ -19,12 +19,26 @@ class LinkViewModel:
 class StatusViewModel:
     session_established: bool
     link_alive: bool
+    armed: bool
     estop: bool
     mode: str
+    failsafe_active: bool
+    nav_valid: bool
+    nav_state: str
+    nav_stale: bool
+    nav_degraded: bool
+    health_state: str
+    fault_state: bool
+    command_status: str
+    last_fault_code: int
+    command_fault_code: int
     active_controller: str
     desired_controller: str
     consecutive_failures: int
     auto_fail_limit: int
+    status_seq: int
+    command_cmd_seq: int
+    t_ns: int
 
 
 @dataclass(frozen=True)
@@ -68,12 +82,26 @@ def build_dashboard_viewmodel(
     status_vm = StatusViewModel(
         session_established=bool(st.session_established),
         link_alive=bool(st.link_alive),
+        armed=bool(st.armed),
         estop=bool(st.estop),
         mode=snapshot.mode_str,
+        failsafe_active=bool(st.failsafe_active),
+        nav_valid=bool(st.nav_valid),
+        nav_state=snapshot.nav_state_str,
+        nav_stale=bool(st.nav_stale),
+        nav_degraded=bool(st.nav_degraded),
+        health_state=snapshot.health_state_str,
+        fault_state=bool(st.fault_state),
+        command_status=snapshot.command_status_str,
+        last_fault_code=int(st.last_fault_code),
+        command_fault_code=int(st.command_fault_code),
         active_controller=str(st.active_controller),
         desired_controller=str(st.desired_controller),
         consecutive_failures=int(st.consecutive_failures),
         auto_fail_limit=int(st.auto_fail_limit),
+        status_seq=int(st.status_seq),
+        command_cmd_seq=int(st.command_cmd_seq),
+        t_ns=int(st.t_ns),
     )
 
     return DashboardViewModel(link=link_vm, status=status_vm, alarms=alarms)
