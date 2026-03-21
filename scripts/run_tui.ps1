@@ -1,40 +1,56 @@
-# scripts/run_tui.ps1
-# ============================================
-# UnderWaterRobotGCS - TUI Launcher
-# ============================================
+param(
+    [switch]$PreflightOnly
+)
 
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
 Write-Host "============================================"
-Write-Host " UnderWaterRobotGCS - TUI Controller"
+Write-Host " UnderWaterRobotGCS - TUI Launcher"
 Write-Host "============================================"
 Write-Host ""
 
-# 切换到项目根目录（以脚本所在位置为基准）
-$SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ROOT_DIR   = Resolve-Path (Join-Path $SCRIPT_DIR "..")
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$RootDir = (Resolve-Path (Join-Path $ScriptDir "..")).Path
+Set-Location $RootDir
 
-Set-Location $ROOT_DIR
-
-Write-Host "[INFO] Project root: $ROOT_DIR"
-Write-Host "[INFO] Starting TUI (keyboard control)..."
-Write-Host ""
-
-# 可选：虚拟环境检查（不强制）
-if (Test-Path ".venv\Scripts\Activate.ps1") {
-    Write-Host "[INFO] Activating virtual environment (.venv)"
-    . .venv\Scripts\Activate.ps1
+if (Test-Path ".venv\Scripts\python.exe") {
+    $PythonCmd = (Resolve-Path ".venv\Scripts\python.exe").Path
+    $PythonArgs = @()
+} elseif (Get-Command py -ErrorAction SilentlyContinue) {
+    $PythonCmd = "py"
+    $PythonArgs = @("-3")
+} elseif (Get-Command python -ErrorAction SilentlyContinue) {
+    $PythonCmd = "python"
+    $PythonArgs = @()
 } else {
-    Write-Host "[WARN] No .venv found, using system Python"
+    Write-Host "[ERR] Python not found. Install Python 3.10+ first."
+    exit 2
 }
 
-Write-Host ""
-Write-Host "[INFO] Press Ctrl+C to exit"
+if ($env:PYTHONPATH) {
+    $env:PYTHONPATH = "$RootDir\src;$($env:PYTHONPATH)"
+} else {
+    $env:PYTHONPATH = "$RootDir\src"
+}
+
+Write-Host "[INFO] Project root: $RootDir"
+Write-Host "[INFO] Python: $PythonCmd"
 Write-Host ""
 
-# 启动 TUI
-python -m urogcs.app.tui_main
+& $PythonCmd @PythonArgs -m urogcs.tools.preflight_check
+if ($LASTEXITCODE -ne 0) {
+    exit $LASTEXITCODE
+}
 
+if ($PreflightOnly) {
+    Write-Host ""
+    Write-Host "[INFO] Preflight only mode complete"
+    exit 0
+}
+
+Write-Host "[WARN] Windows 当前只提供最小观测/诊断路径，键盘 teleop 仍然以 POSIX 平台为准。"
+Write-Host "[INFO] Starting TUI"
 Write-Host ""
-Write-Host "[INFO] TUI exited"
+& $PythonCmd @PythonArgs -m urogcs.app.tui.tui_main
+exit $LASTEXITCODE

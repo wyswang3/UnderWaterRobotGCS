@@ -99,6 +99,12 @@ class GcsServiceState:
     nav_degraded: bool = False
     nav_fault_code: int = 0
     nav_status_flags: int = 0
+    imu_online: bool = False
+    dvl_online: bool = False
+    imu_reconnecting: bool = False
+    dvl_reconnecting: bool = False
+    imu_mismatch: bool = False
+    dvl_mismatch: bool = False
     fault_state: bool = False
     health_state: int = 0
 
@@ -395,6 +401,12 @@ class GcsService:
         self._state.nav_degraded = bool(getattr(st, "nav_degraded", False))
         self._state.nav_fault_code = int(getattr(st, "nav_fault_code", 0))
         self._state.nav_status_flags = int(getattr(st, "nav_status_flags", 0))
+        self._state.imu_online = bool(getattr(st, "imu_online", False))
+        self._state.dvl_online = bool(getattr(st, "dvl_online", False))
+        self._state.imu_reconnecting = bool(getattr(st, "imu_reconnecting", False))
+        self._state.dvl_reconnecting = bool(getattr(st, "dvl_reconnecting", False))
+        self._state.imu_mismatch = bool(getattr(st, "imu_mismatch", False))
+        self._state.dvl_mismatch = bool(getattr(st, "dvl_mismatch", False))
         self._state.fault_state = bool(getattr(st, "fault_state", False))
         self._state.health_state = int(getattr(st, "health_state", 0))
 

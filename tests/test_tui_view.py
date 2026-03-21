@@ -10,25 +10,35 @@ from urogcs.protocol.wire import WireControlMode
 
 
 class TuiViewTests(unittest.TestCase):
-    def test_render_includes_replay_nav_diag_and_command_result(self) -> None:
+    def test_render_groups_customer_facing_statuses(self) -> None:
         dashboard = TuiDashboard()
         snapshot = TuiStatusSnapshot(
             local_estop=False,
-            local_mode=WireControlMode.Manual,
+            local_mode=WireControlMode.Auto,
+            session_established=1,
+            link_alive=1,
+            status_age_ms=80.0,
+            status_seq=21,
             remote_armed=1,
-            remote_mode="Failsafe",
-            remote_failsafe=1,
+            remote_mode="Manual",
+            remote_failsafe=0,
             nav_valid=0,
             nav_state="Invalid",
-            nav_stale=1,
-            nav_degraded=1,
-            nav_fault_name="DvlDeviceMismatch",
-            nav_diag_summary="invalid,dvl_mismatch",
+            nav_stale=0,
+            nav_degraded=0,
+            nav_fault_name="ImuDisconnected",
+            nav_diag_summary="invalid,imu_reconnecting",
+            imu_reconnecting=1,
+            dvl_online=1,
             health_state="Fault",
             fault_state=1,
             last_fault_code=4,
             command_status="Rejected",
+            command_fault_code=8,
             command_cmd_seq=22,
+            last_tx_kind="SET_MODE",
+            last_tx_seq=22,
+            last_ack_code="OK",
         )
 
         buf = io.StringIO()
@@ -41,8 +51,13 @@ class TuiViewTests(unittest.TestCase):
             tui_view._IS_ANSI_TERMINAL = original_ansi
 
         rendered = buf.getvalue()
-        self.assertIn("diag=invalid,dvl_mismatch", rendered)
-        self.assertIn("runtime=Rejected cmd_seq=22", rendered)
+        self.assertIn("[CONN] state=connected", rendered)
+        self.assertIn("[DEV ] overall=reconnecting imu=reconnecting dvl=online", rendered)
+        self.assertIn("[NAV ] state=invalid", rendered)
+        self.assertIn("transport=acknowledged", rendered)
+        self.assertIn("runtime=rejected", rendered)
+        self.assertIn("lifecycle=sent>acknowledged>rejected", rendered)
+        self.assertIn("blocked=imu_reconnecting", rendered)
 
 
 if __name__ == "__main__":

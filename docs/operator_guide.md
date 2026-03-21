@@ -128,7 +128,7 @@ scripts\run_tui.ps1
 #### Linux / macOS
 
 ```bash
-python -m urogcs.app.tui_main
+PYTHONPATH=src python -m urogcs.app.tui.tui_main
 ```
 
 ---
