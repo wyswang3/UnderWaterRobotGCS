@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from urogcs.core.service import GcsService, GcsServiceConfig, GcsServiceState
 from urogcs.telemetry.model import TelemetrySnapshot
+from urogcs.telemetry.ros2_mirror_source import Ros2MirrorSnapshotSource
 
 from .gui_env import GuiConfig
 from .overview_presenter import OverviewCardState, OverviewContext, build_overview_state
@@ -84,6 +85,7 @@ class OverviewMainWindow(QMainWindow):
         super().__init__()
         self._cfg = cfg
         self._service: Optional[GcsService] = None
+        self._ros2_source: Optional[Ros2MirrorSnapshotSource] = None
         self._snapshot = TelemetrySnapshot()
         self._last_log = ""
 
@@ -247,7 +249,32 @@ class OverviewMainWindow(QMainWindow):
         return GcsService(svc_cfg, on_status=self._on_status, on_log=self._on_log)
 
     def connect_service(self) -> None:
-        if self._service is not None:
+        if self._service is not None or self._ros2_source is not None:
+            return
+
+        if self._cfg.telemetry_source == "ros2":
+            self._last_log = "Connecting to ROS2 mirror..."
+            self._status_label.setText("Connecting...")
+            QApplication.processEvents()
+
+            source = Ros2MirrorSnapshotSource(on_log=self._on_log)
+            ok = source.start()
+            if not ok:
+                self._last_log = source.last_error or "ROS2 mirror source failed."
+                source.close()
+                self._ros2_source = None
+                self._snapshot = TelemetrySnapshot()
+                self._stop_timers()
+                self._connect_button.setEnabled(True)
+                self._disconnect_button.setEnabled(False)
+                self._refresh_dashboard()
+                return
+
+            self._ros2_source = source
+            self._connect_button.setEnabled(False)
+            self._disconnect_button.setEnabled(True)
+            self._start_timers()
+            self._refresh_dashboard()
             return
 
         self._last_log = "Connecting to vehicle..."
@@ -279,6 +306,11 @@ class OverviewMainWindow(QMainWindow):
                 self._service.close()
             finally:
                 self._service = None
+        if self._ros2_source is not None:
+            try:
+                self._ros2_source.close()
+            finally:
+                self._ros2_source = None
         self._stop_timers()
         self._snapshot = TelemetrySnapshot()
         self._last_log = "Disconnected by operator."
@@ -291,9 +323,11 @@ class OverviewMainWindow(QMainWindow):
         refresh_interval_ms = max(50, int(1000 / max(1, self._cfg.refresh_hz)))
         self._poll_timer.start(poll_interval_ms)
         self._refresh_timer.start(refresh_interval_ms)
-        if self._cfg.heartbeat_hz > 0:
+        if self._service is not None and self._cfg.heartbeat_hz > 0:
             hb_interval_ms = max(100, int(1000 / max(1, self._cfg.heartbeat_hz)))
             self._hb_timer.start(hb_interval_ms)
+        else:
+            self._hb_timer.stop()
 
     def _stop_timers(self) -> None:
         self._poll_timer.stop()
@@ -301,9 +335,12 @@ class OverviewMainWindow(QMainWindow):
         self._refresh_timer.stop()
 
     def _poll_service(self) -> None:
-        if self._service is None:
+        if self._service is not None:
+            self._service.poll(max_packets=16)
             return
-        self._service.poll(max_packets=16)
+        if self._ros2_source is not None:
+            self._ros2_source.poll(max_callbacks=16)
+            self._snapshot = self._ros2_source.snapshot
 
     def _send_heartbeat(self) -> None:
         if self._service is None:
@@ -317,11 +354,15 @@ class OverviewMainWindow(QMainWindow):
         self._last_log = msg
 
     def _service_state(self) -> GcsServiceState:
-        if self._service is None:
-            return GcsServiceState()
-        return self._service.state
+        if self._service is not None:
+            return self._service.state
+        if self._ros2_source is not None:
+            return self._ros2_source.state
+        return GcsServiceState()
 
     def _refresh_dashboard(self) -> None:
+        if self._ros2_source is not None:
+            self._snapshot = self._ros2_source.snapshot
         context = OverviewContext(
             rov_addr=f"{self._cfg.rov_ip}:{self._cfg.rov_port}",
             bind_addr=f"{self._cfg.bind_ip}:{self._cfg.bind_port}",

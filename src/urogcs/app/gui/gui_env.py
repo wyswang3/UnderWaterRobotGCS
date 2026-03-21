@@ -24,6 +24,7 @@ class GuiConfig:
 
     refresh_hz: int = 5
     auto_connect: bool = True
+    telemetry_source: str = "udp"
     window_title: str = "UnderWaterRobotGCS"
 
     @staticmethod
@@ -43,5 +44,6 @@ class GuiConfig:
 
         cfg.refresh_hz = int(os.getenv("UROGCS_GUI_REFRESH_HZ", str(cfg.refresh_hz)))
         cfg.auto_connect = os.getenv("UROGCS_GUI_AUTOCONNECT", "1") not in {"0", "false", "False"}
+        cfg.telemetry_source = os.getenv("UROGCS_GUI_SOURCE", cfg.telemetry_source).strip().lower() or cfg.telemetry_source
         cfg.window_title = os.getenv("UROGCS_GUI_TITLE", cfg.window_title)
         return cfg

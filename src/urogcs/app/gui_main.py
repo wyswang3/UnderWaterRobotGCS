@@ -20,6 +20,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="developer smoke-test helper for headless/offscreen launch validation",
     )
+    parser.add_argument(
+        "--telemetry-source",
+        choices=["udp", "ros2"],
+        default=None,
+        help="select the dashboard data source; ROS2 is a read-only mirror preview path",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -32,6 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         raise
 
     cfg = GuiConfig.from_env()
+    if args.telemetry_source is not None:
+        cfg.telemetry_source = args.telemetry_source
     auto_connect = cfg.auto_connect and not args.no_auto_connect
 
     # Allow CI/headless smoke tests to request a finite GUI lifetime without
