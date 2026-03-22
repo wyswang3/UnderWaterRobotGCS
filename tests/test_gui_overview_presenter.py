@@ -133,6 +133,8 @@ class GuiOverviewPresenterTests(unittest.TestCase):
         self.assertEqual(state.connection.summary, "Disconnected")
         self.assertEqual(state.command.summary, "Idle")
         self.assertEqual(state.faults.severity, "warn")
+        self.assertIn("TUI-only", state.footer)
+        self.assertIn("one key at a time", state.footer)
 
 
 if __name__ == "__main__":

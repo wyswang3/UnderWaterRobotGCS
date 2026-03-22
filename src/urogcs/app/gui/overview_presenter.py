@@ -103,7 +103,7 @@ def _build_footer(context: OverviewContext) -> str:
         return context.last_log
     if context.advisory_recommended_action and context.advisory_summary not in {"", "ok"}:
         return f"advisory={context.advisory_summary}; action={context.advisory_recommended_action}"
-    return "GUI ready. Waiting for telemetry updates."
+    return "GUI ready. Waiting for telemetry updates. Teleop note: keyboard motion is TUI-only and one key at a time."
 
 
 def _build_connection_card(

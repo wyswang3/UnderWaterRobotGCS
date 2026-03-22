@@ -112,6 +112,9 @@ else:
         注意：
         - 安全相关按键（急停、解急停、解锁/上锁等）应由上层 TUI 直接
           转成“控制请求”发送给香橙派，由 ControlGuard 实现真实的解锁与 failsafe。
+        - 当前产品化基线要求“单次只接受一个运动键”，避免组合运动导致
+          运动学意图与瞬时功耗都变得不透明；若检测到多个运动键，本层会
+          拒绝该 tick 的运动输入并让 DOF 按既有衰减回零。
         """
 
         def __init__(
@@ -138,26 +141,32 @@ else:
             """
             self.cmd = DofCommand()
 
+        def motion_keys(self, pressed: Iterable[str]) -> Set[str]:
+            """提取当前 tick 中真正属于 6DOF 运动控制的键集合。"""
+            return {key for key in set(pressed) if key in self.bindings}
+
         def update(self, pressed: Iterable[str]) -> DofCommand:
             """
-            :param pressed: 当前 tick 的按键集合（小写字符串，如 {'w','a'}）。
+            :param pressed: 当前 tick 的按键集合（小写字符串，如 {'w'}）。
             :return: 更新后的 DofCommand（内部状态的快照）。
             """
-            pressed_set: Set[str] = set(pressed)
+            motion_pressed: Set[str] = self.motion_keys(pressed)
 
-            # === 1) 衰减逻辑：只有在“没有 DOF 键按下”时才衰减 ===
+            # === 1) 衰减逻辑：只有在“恰好一个 DOF 键按下”时才接受运动输入 ===
             #
             # 直觉：
-            #   - 按住键时：持续“加油门”，不减速；
-            #   - 松手后：才慢慢减速回到 0。
+            #   - 按住单个运动键时：持续“加油门”，不减速；
+            #   - 松手后：才慢慢减速回到 0；
+            #   - 若出现组合运动键：本 tick 运动输入无效，按衰减回零。
             #
-            if not pressed_set:
+            if len(motion_pressed) != 1:
                 self._apply_decay()
-            # 若有按键，则不做衰减（保留上一 tick 的值，再叠加 step）
+                motion_pressed = set()
+            # 若恰好有一个运动键，则不做衰减（保留上一 tick 的值，再叠加 step）
 
             # === 2) 处理本 tick 的按键增量 ===
             step = self.profile.step
-            for k in pressed_set:
+            for k in motion_pressed:
                 act = self.bindings.get(k)
                 if not act:
                     continue

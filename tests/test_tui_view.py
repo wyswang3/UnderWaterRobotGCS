@@ -58,6 +58,7 @@ class TuiViewTests(unittest.TestCase):
         self.assertIn("runtime=rejected", rendered)
         self.assertIn("lifecycle=sent>acknowledged>rejected", rendered)
         self.assertIn("blocked=imu_reconnecting", rendered)
+        self.assertIn("teleop_motion=single_key_only", rendered)
 
 
 if __name__ == "__main__":

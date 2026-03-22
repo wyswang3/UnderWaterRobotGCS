@@ -310,6 +310,7 @@ class TuiDashboard:
       [CTRL] ...  (本地/远端控制状态)
       [CMD ] ...  (sent / acknowledged / runtime 结果)
       [HINT] ...  (客户下一步动作)
+      [SAFE] ...  (单键 teleop 安全提示)
       [DOF ] ...  (当前 6DOF 命令)
       [LOG ] ...  (最近一条日志)
 
@@ -319,7 +320,7 @@ class TuiDashboard:
       - 非 ANSI 终端（如某些 Windows 控制台）则退化为普通 print，每次多输出一组状态块。
     """
 
-    def __init__(self, panel_height: int = 9) -> None:
+    def __init__(self, panel_height: int = 10) -> None:
         self.panel_height = panel_height
         self.initialized = False
         self._last_width = 0
@@ -412,6 +413,11 @@ class TuiDashboard:
         line7 = f"[HINT] blocked={blocked_reason} next={next_action}"
 
         line8 = (
+            "[SAFE] teleop_motion=single_key_only combo_motion_keys=ignored "
+            "reason=kinematics+battery_safety"
+        )
+
+        line9 = (
             f"[DOF ] surge={cmd.surge:+.2f} sway={cmd.sway:+.2f} "
             f"heave={cmd.heave:+.2f} roll={cmd.roll:+.2f} "
             f"pitch={cmd.pitch:+.2f} yaw={cmd.yaw:+.2f}"
@@ -420,9 +426,9 @@ class TuiDashboard:
         log_text = snap.last_log or ""
         if len(log_text) > 120:
             log_text = log_text[:117] + "..."
-        line9 = f"[LOG ] {log_text}"
+        line10 = f"[LOG ] {log_text}"
 
-        lines = [line1, line2, line3, line4, line5, line6, line7, line8, line9]
+        lines = [line1, line2, line3, line4, line5, line6, line7, line8, line9, line10]
 
         max_width = max(len(l) for l in lines)
         self._last_width = max(self._last_width, max_width)

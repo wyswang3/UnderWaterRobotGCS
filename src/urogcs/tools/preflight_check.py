@@ -79,6 +79,7 @@ def run_preflight(cfg: TuiConfig, *, bind_check: bool = True) -> int:
     print('')
     print('[NEXT] ROV side order: uwnav_navd -> nav_viewd -> gcs_server -> pwm_control_program')
     print('[NEXT] Operator side: run scripts/run_gui.sh, scripts/run_gui.ps1, or the existing TUI entry after preflight passes')
+    print('[NEXT] Teleop safety: keyboard motion accepts one key at a time; motion-key combos are ignored by GCS.')
     if sys.platform.startswith('win'):
         print('[NEXT] Windows GUI is a first-stage preview; keyboard teleop still remains outside the current supported path.')
 

@@ -104,6 +104,7 @@ def run_tui(cfg: TuiConfig) -> int:
     raw_cmd = DofCommand()
 
     last_arm_log_ns = 0  # 未解锁提醒限流
+    last_single_motion_warn_ns = 0
 
     # 键盘错误日志限流（避免刷屏）
     last_kb_error_msg = ""
@@ -133,6 +134,7 @@ def run_tui(cfg: TuiConfig) -> int:
         print("      Continuous DOF: W/S/A/D/Q/E/H/G/R/T/F/V")
         print("      Discrete keys : SPACE (E-STOP toggle), m (clear estop+center), "
               ", / '，'(Arm), . / '。'(Disarm), -/_ & =/+ (throttle), 1/2/3 (mode)")
+        print("      Safety note : motion teleop accepts one key at a time; motion-key combos are ignored.")
         print("")
 
         kb = create_keyboard()
@@ -157,6 +159,13 @@ def run_tui(cfg: TuiConfig) -> int:
 
                 # 5.3 键盘输入：离散命令 + 连续 DOF
                 keys = kb.read_keys_tick()
+                motion_keys = mapper.motion_keys(keys)
+                if len(motion_keys) > 1 and now - last_single_motion_warn_ns > 1_000_000_000:
+                    on_log(
+                        "[KB] multiple motion keys ignored; teleop accepts one motion key at a time "
+                        "for kinematics/battery safety"
+                    )
+                    last_single_motion_warn_ns = now
                 actions: DiscreteActions = apply_special_keys(keys)
 
                 # --- 5.3.1 退出 ---
@@ -196,7 +205,7 @@ def run_tui(cfg: TuiConfig) -> int:
                     on_log("[KB] DOF centered")
 
                 if actions.help:
-                    on_log("[KB] Help requested (TUI help not implemented yet)")
+                    on_log("[KB] Help: one motion key at a time; motion-key combos are ignored")
 
                 # --- 5.3.5 全局油门调整 ---
                 if actions.throttle_delta != 0.0:
