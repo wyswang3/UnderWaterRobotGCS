@@ -69,6 +69,56 @@ class GuiOverviewPresenterTests(unittest.TestCase):
         self.assertIn("heading_hold", state.control.detail)
         self.assertIn("last_log=[HS] session established", state.faults.detail)
 
+    def test_presenter_surfaces_ros2_advisory_recovery_text(self) -> None:
+        snapshot = TelemetrySnapshot(
+            status=StatusTelemetry(
+                session_established=1,
+                link_alive=1,
+                armed=0,
+                estop=0,
+                mode=1,
+                failsafe_active=0,
+                nav_valid=1,
+                nav_state=3,
+                nav_stale=0,
+                nav_degraded=0,
+                nav_fault_code=0,
+                nav_status_flags=(1 << 6) | (1 << 7),
+                fault_state=0,
+                health_state=1,
+                command_status=0,
+                last_fault_code=0,
+                command_fault_code=0,
+                active_controller="manual",
+                desired_controller="manual",
+                consecutive_failures=0,
+                auto_fail_limit=5,
+                status_seq=43,
+                command_cmd_seq=0,
+            ),
+            last_rx_ns=3_000_000_000,
+        )
+
+        state = build_overview_state(
+            snapshot,
+            GcsServiceState(session_established=True, session_id=7, link_alive=True),
+            now_ns=3_050_000_000,
+            context=OverviewContext(
+                rov_addr="127.0.0.1:14550",
+                bind_addr="0.0.0.0:14551",
+                telemetry_source="ros2",
+                advisory_summary="device_reconnecting",
+                advisory_recommended_action="wait for reconnect to complete; if it does not recover, inspect USB power and cabling",
+                advisory_severity=2,
+            ),
+        )
+
+        self.assertIn("source=ros2_preview", state.header_detail)
+        self.assertEqual(state.faults.summary, "ADVISORY / device_reconnecting")
+        self.assertEqual(state.faults.severity, "warn")
+        self.assertIn("action=wait for reconnect to complete", state.faults.detail)
+        self.assertIn("advisory=device_reconnecting", state.footer)
+
     def test_presenter_reports_disconnected_without_status(self) -> None:
         state = build_overview_state(
             TelemetrySnapshot(),

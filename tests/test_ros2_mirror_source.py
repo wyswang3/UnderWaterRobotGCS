@@ -37,6 +37,14 @@ def _frame():
     )
 
 
+def _health_monitor_msg():
+    return SimpleNamespace(
+        severity=2,
+        summary='device_reconnecting',
+        recommended_action='wait for reconnect to complete; if it does not recover, inspect USB power and cabling',
+    )
+
+
 class Ros2MirrorSourceTests(unittest.TestCase):
     def test_source_callback_updates_snapshot_and_service_state(self) -> None:
         source = Ros2MirrorSnapshotSource()
@@ -50,6 +58,14 @@ class Ros2MirrorSourceTests(unittest.TestCase):
         self.assertEqual(source.state.command_cmd_seq, 41)
         self.assertTrue(source.state.imu_online)
         self.assertTrue(source.state.dvl_online)
+
+    def test_source_tracks_ros2_health_monitor_advisory(self) -> None:
+        source = Ros2MirrorSnapshotSource()
+        source._on_health_monitor(_health_monitor_msg())
+
+        self.assertEqual(source.health_advisory.severity, 2)
+        self.assertEqual(source.health_advisory.summary, 'device_reconnecting')
+        self.assertIn('inspect USB power', source.health_advisory.recommended_action)
 
     @unittest.skipIf(importlib.util.find_spec('rclpy') is not None, 'rclpy available in this environment')
     def test_source_reports_missing_ros2_runtime_cleanly(self) -> None:

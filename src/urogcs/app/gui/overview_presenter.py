@@ -40,6 +40,10 @@ class OverviewContext:
     rov_addr: str
     bind_addr: str
     last_log: str = ""
+    telemetry_source: str = "udp"
+    advisory_summary: str = ""
+    advisory_recommended_action: str = ""
+    advisory_severity: int = 0
 
 
 def build_overview_state(
@@ -54,15 +58,21 @@ def build_overview_state(
         header_title="Overview Dashboard",
         header_detail=(
             f"target={context.rov_addr}    bind={context.bind_addr}    "
-            f"session={_session_text(service_state)}"
+            f"source={_source_text(context)}    session={_session_text(service_state)}"
         ),
         connection=_build_connection_card(vm, service_state),
         device=_build_device_card(vm),
         navigation=_build_navigation_card(vm),
         control=_build_control_card(vm),
         command=_build_command_card(vm, service_state),
-        faults=_build_fault_card(vm, context.last_log),
-        footer=context.last_log or "GUI ready. Waiting for telemetry updates.",
+        faults=_build_fault_card(
+            vm,
+            context.last_log,
+            context.advisory_summary,
+            context.advisory_recommended_action,
+            context.advisory_severity,
+        ),
+        footer=_build_footer(context),
     )
 
 
@@ -70,6 +80,30 @@ def _session_text(service_state: GcsServiceState) -> str:
     if service_state.session_id is None:
         return "none"
     return str(service_state.session_id)
+
+
+def _source_text(context: OverviewContext) -> str:
+    if context.telemetry_source == "ros2":
+        return "ros2_preview"
+    return context.telemetry_source or "udp"
+
+
+def _advisory_severity(level: int) -> str:
+    if level >= 3:
+        return "crit"
+    if level == 2:
+        return "warn"
+    if level == 1:
+        return "ok"
+    return "neutral"
+
+
+def _build_footer(context: OverviewContext) -> str:
+    if context.last_log:
+        return context.last_log
+    if context.advisory_recommended_action and context.advisory_summary not in {"", "ok"}:
+        return f"advisory={context.advisory_summary}; action={context.advisory_recommended_action}"
+    return "GUI ready. Waiting for telemetry updates."
 
 
 def _build_connection_card(
@@ -291,8 +325,30 @@ def _alarm_level_to_severity(level: Optional[AlarmLevel]) -> str:
     return "ok"
 
 
-def _build_fault_card(vm: DashboardViewModel, last_log: str) -> OverviewCardState:
+def _build_fault_card(
+    vm: DashboardViewModel,
+    last_log: str,
+    advisory_summary: str,
+    advisory_recommended_action: str,
+    advisory_severity: int,
+) -> OverviewCardState:
+    advisory_summary = advisory_summary.strip()
+    advisory_recommended_action = advisory_recommended_action.strip()
+
     if not vm.alarms:
+        if advisory_summary and advisory_summary != "ok":
+            lines = [f"ros2_advisory={advisory_summary}"]
+            if advisory_recommended_action:
+                lines.append(f"action={advisory_recommended_action}")
+            if last_log:
+                lines.append(f"last_log={last_log}")
+            return OverviewCardState(
+                "Fault Summary",
+                f"ADVISORY / {advisory_summary}",
+                "\n".join(lines),
+                _advisory_severity(advisory_severity),
+            )
+
         detail = "No active alarms."
         if last_log:
             detail += f"\nlast_log={last_log}"
@@ -308,6 +364,10 @@ def _build_fault_card(vm: DashboardViewModel, last_log: str) -> OverviewCardStat
             lines.append(f"{alarm.level.value.upper()} {alarm.title}: {detail}")
         else:
             lines.append(f"{alarm.level.value.upper()} {alarm.title}")
+    if advisory_summary and advisory_summary != "ok":
+        lines.append(f"ros2_advisory={advisory_summary}")
+        if advisory_recommended_action:
+            lines.append(f"action={advisory_recommended_action}")
     if last_log:
         lines.append(f"last_log={last_log}")
 

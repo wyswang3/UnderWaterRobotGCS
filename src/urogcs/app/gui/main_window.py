@@ -361,12 +361,23 @@ class OverviewMainWindow(QMainWindow):
         return GcsServiceState()
 
     def _refresh_dashboard(self) -> None:
+        advisory_summary = ""
+        advisory_recommended_action = ""
+        advisory_severity = 0
         if self._ros2_source is not None:
             self._snapshot = self._ros2_source.snapshot
+            advisory = self._ros2_source.health_advisory
+            advisory_summary = advisory.summary
+            advisory_recommended_action = advisory.recommended_action
+            advisory_severity = advisory.severity
         context = OverviewContext(
             rov_addr=f"{self._cfg.rov_ip}:{self._cfg.rov_port}",
             bind_addr=f"{self._cfg.bind_ip}:{self._cfg.bind_port}",
             last_log=self._last_log,
+            telemetry_source=self._cfg.telemetry_source,
+            advisory_summary=advisory_summary,
+            advisory_recommended_action=advisory_recommended_action,
+            advisory_severity=advisory_severity,
         )
         state = build_overview_state(
             self._snapshot,

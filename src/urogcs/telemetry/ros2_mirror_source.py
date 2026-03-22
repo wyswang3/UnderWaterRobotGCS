@@ -7,6 +7,7 @@ consumes `/rov/telemetry` mirror data and updates the existing GCS snapshot
 model. It does not send control, heartbeat, or safety decisions over ROS2.
 """
 
+from dataclasses import dataclass
 import time
 from typing import Callable, Optional
 
@@ -17,11 +18,26 @@ from urogcs.telemetry.ros2_mirror_adapter import build_snapshot_from_mirror
 LogCallback = Callable[[str], None]
 
 
+@dataclass(frozen=True)
+class HealthMonitorAdvisory:
+    severity: int = 0
+    summary: str = ''
+    recommended_action: str = ''
+
+
 class Ros2MirrorSnapshotSource:
-    def __init__(self, *, telemetry_topic: str = '/rov/telemetry', on_log: Optional[LogCallback] = None) -> None:
+    def __init__(
+        self,
+        *,
+        telemetry_topic: str = '/rov/telemetry',
+        health_monitor_topic: str = '/rov/health_monitor',
+        on_log: Optional[LogCallback] = None,
+    ) -> None:
         self.telemetry_topic = telemetry_topic
+        self.health_monitor_topic = health_monitor_topic
         self._user_on_log = on_log
         self._snapshot = TelemetrySnapshot()
+        self._health_advisory = HealthMonitorAdvisory()
         self._state = GcsServiceState()
         self._rclpy = None
         self._node = None
@@ -34,6 +50,10 @@ class Ros2MirrorSnapshotSource:
         return self._snapshot
 
     @property
+    def health_advisory(self) -> HealthMonitorAdvisory:
+        return self._health_advisory
+
+    @property
     def state(self) -> GcsServiceState:
         return self._state
 
@@ -42,7 +62,7 @@ class Ros2MirrorSnapshotSource:
             import rclpy
             from rclpy.node import Node
             from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-            from rov_msgs.msg import TelemetryFrameV2
+            from rov_msgs.msg import HealthMonitorStatus, TelemetryFrameV2
         except ModuleNotFoundError as exc:
             self.last_error = 'ROS2 mirror source requires rclpy and generated rov_msgs Python modules'
             self._log(self.last_error)
@@ -60,8 +80,12 @@ class Ros2MirrorSnapshotSource:
         qos.history = HistoryPolicy.KEEP_LAST
         qos.durability = DurabilityPolicy.VOLATILE
         self._node.create_subscription(TelemetryFrameV2, self.telemetry_topic, self._on_telemetry, qos)
+        self._node.create_subscription(HealthMonitorStatus, self.health_monitor_topic, self._on_health_monitor, qos)
         self.last_error = ''
-        self._log(f'ROS2 mirror source subscribed: {self.telemetry_topic}')
+        self._log(
+            'ROS2 mirror source subscribed: '
+            f'{self.telemetry_topic} and advisory {self.health_monitor_topic}'
+        )
         return True
 
     def poll(self, max_callbacks: int = 16) -> None:
@@ -118,6 +142,13 @@ class Ros2MirrorSnapshotSource:
         self._state.consecutive_failures = int(status.consecutive_failures)
         self._state.auto_fail_limit = int(status.auto_fail_limit)
         self._state.last_status_raw = status
+
+    def _on_health_monitor(self, msg: object) -> None:
+        self._health_advisory = HealthMonitorAdvisory(
+            severity=int(getattr(msg, 'severity', 0)),
+            summary=str(getattr(msg, 'summary', '') or ''),
+            recommended_action=str(getattr(msg, 'recommended_action', '') or ''),
+        )
 
     def _log(self, msg: str) -> None:
         if self._user_on_log is not None:
