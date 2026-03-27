@@ -110,7 +110,7 @@ class OverviewMainWindow(QMainWindow):
 
         self._connection_card = StatusCard("Connection")
         self._device_card = StatusCard("Devices")
-        self._navigation_card = StatusCard("Navigation")
+        self._navigation_card = StatusCard("Motion Info")
         self._control_card = StatusCard("Control")
         self._command_card = StatusCard("Command")
         self._fault_card = StatusCard("Fault Summary")

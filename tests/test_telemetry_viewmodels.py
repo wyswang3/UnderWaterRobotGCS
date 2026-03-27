@@ -49,12 +49,50 @@ class TelemetryViewModelTests(unittest.TestCase):
         self.assertEqual(vm.status.nav_state, "Ok")
         self.assertEqual(vm.status.nav_fault_name, "None")
         self.assertEqual(vm.status.nav_diagnostic_summary, "degraded")
+        self.assertEqual(vm.status.capability_level, "relative_nav")
+        self.assertIn("IMU + DVL 在线时可观察相对运动", vm.status.capability_summary)
+        self.assertIn("观测能力", vm.status.motion_observation_hint)
         self.assertTrue(vm.status.imu_online)
         self.assertTrue(vm.status.dvl_online)
+        self.assertEqual(vm.status.imu_state, "online")
+        self.assertEqual(vm.status.dvl_state, "online")
         self.assertEqual(vm.status.health_state, "Degraded")
         self.assertEqual(vm.status.command_status, "Executed")
         self.assertEqual(vm.status.status_seq, 99)
         self.assertEqual(vm.status.command_cmd_seq, 123)
+
+    def test_dashboard_viewmodel_marks_control_only_missing_sensors_as_not_present_and_optional(self) -> None:
+        snapshot = TelemetrySnapshot(
+            status=StatusTelemetry(
+                session_established=1,
+                link_alive=1,
+                armed=0,
+                estop=0,
+                mode=1,
+                failsafe_active=0,
+                nav_valid=0,
+                nav_state=1,
+                nav_stale=1,
+                nav_degraded=0,
+                nav_fault_code=9,
+                nav_status_flags=0,
+                fault_state=0,
+                health_state=2,
+                command_status=0,
+                last_fault_code=0,
+                command_fault_code=0,
+            ),
+            last_rx_ns=1_000_000_000,
+        )
+
+        vm = build_dashboard_viewmodel(snapshot, now_ns=1_050_000_000)
+
+        assert vm.status is not None
+        self.assertEqual('control_only', vm.status.capability_level)
+        self.assertEqual('not_present', vm.status.imu_state)
+        self.assertEqual('optional_missing', vm.status.dvl_state)
+        self.assertIn('teleop primary', vm.status.imu_state_detail)
+        self.assertIn('external optional module', vm.status.dvl_state_detail)
 
     def test_alarms_flag_failsafe_nav_fault_and_command_failure(self) -> None:
         snapshot = TelemetrySnapshot(

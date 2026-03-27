@@ -77,8 +77,9 @@ def run_preflight(cfg: TuiConfig, *, bind_check: bool = True) -> int:
             failures += 1
 
     print('')
-    print('[NEXT] ROV side order: uwnav_navd -> nav_viewd -> gcs_server -> pwm_control_program')
-    print('[NEXT] Operator side: run scripts/run_gui.sh, scripts/run_gui.ps1, or the existing TUI entry after preflight passes')
+    print('[NEXT] ROV side default lane: run phase0_supervisor.py preflight/start --profile control_only; pwm_control_program + gcs_server are the minimum runtime pair.')
+    print('[NEXT] Optional nav upgrade: only after imu_only / imu_dvl readiness is stable, switch to the bench nav preview lane.')
+    print('[NEXT] Operator side: run scripts/run_tui.sh for teleop; run scripts/run_gui.sh or scripts/run_gui.ps1 as the read-only status/motion observer after preflight passes.')
     print('[NEXT] Teleop safety: keyboard motion accepts one key at a time; motion-key combos are ignored by GCS.')
     if sys.platform.startswith('win'):
         print('[NEXT] Windows GUI is a first-stage preview; keyboard teleop still remains outside the current supported path.')
