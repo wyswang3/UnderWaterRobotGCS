@@ -149,7 +149,20 @@ class GcsSessionClient:
 
         # -------- UDP socket 初始化 --------
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # Note: GUI may pass bind_port=0 (ephemeral) so it can coexist with the TUI.
+        # We still want rapid restarts to work during bench bring-up.
+        try:
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except OSError:
+            pass
+
         self.sock.bind(self.bind_addr)
+        # If bind_port=0, the OS picks an ephemeral port; capture the real bound tuple for logs/UX.
+        try:
+            host, port = self.sock.getsockname()[:2]
+            self.bind_addr = (str(host), int(port))
+        except OSError:
+            pass
         self.sock.settimeout(max(0.001, self.recv_timeout_ms / 1000.0))
 
         # 会话状态

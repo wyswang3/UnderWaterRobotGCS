@@ -83,9 +83,13 @@ UROGCS_ROV_IP=<OrangePi_IP> PYTHONPATH=src python -m urogcs.app.tui.tui_main
 当前默认使用：
 
 - ROV 端口：`14550`
-- 本地绑定端口：`14551`
+- TUI 本地绑定端口：`14551`
+- GUI 本地绑定端口：`0`（临时端口，避免与 TUI 抢占同一端口）
 
-这些默认值位于 `src/urogcs/app/tui/tui_env.py`。
+这些默认值位于：
+
+- TUI: `src/urogcs/app/tui/tui_env.py`
+- GUI: `src/urogcs/app/gui/gui_env.py`
 
 ## 5. 当前已验证的使用方式
 

@@ -294,6 +294,14 @@ class OverviewMainWindow(QMainWindow):
             self._refresh_dashboard()
             return
 
+        # If GUI used an ephemeral bind port (0), reflect the actual chosen port in the UI header.
+        cli = service.client
+        if cli is not None:
+            try:
+                self._cfg.bind_ip, self._cfg.bind_port = cli.bind_addr
+            except Exception:
+                pass
+
         self._service = service
         self._connect_button.setEnabled(False)
         self._disconnect_button.setEnabled(True)
