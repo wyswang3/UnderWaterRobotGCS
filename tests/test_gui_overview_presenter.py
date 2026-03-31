@@ -61,13 +61,62 @@ class GuiOverviewPresenterTests(unittest.TestCase):
         )
 
         self.assertEqual(state.connection.summary, "Connected")
-        self.assertEqual(state.device.summary, "Reconnecting")
-        self.assertEqual(state.navigation.summary, "Degraded")
+        self.assertEqual(state.device.summary, "Stale / Reconnecting")
+        self.assertEqual(state.navigation.title, "Motion Info")
+        self.assertEqual(state.navigation.summary, "Attitude Feedback")
         self.assertEqual(state.control.summary, "Armed / Manual")
         self.assertEqual(state.command.summary, "acknowledged / executed")
         self.assertEqual(state.command.severity, "ok")
         self.assertIn("heading_hold", state.control.detail)
+        self.assertIn("IMU 在线时可观察姿态反馈", state.navigation.detail)
+        self.assertIn("sensor_diag=imu:online,dvl:stale", state.navigation.detail)
+        self.assertIn("DVL=stale", state.device.detail)
+        self.assertIn("observation_level=attitude_feedback", state.navigation.detail)
         self.assertIn("last_log=[HS] session established", state.faults.detail)
+
+    def test_presenter_reports_relative_nav_when_imu_and_dvl_are_online(self) -> None:
+        snapshot = TelemetrySnapshot(
+            status=StatusTelemetry(
+                session_established=1,
+                link_alive=1,
+                armed=0,
+                estop=0,
+                mode=1,
+                failsafe_active=0,
+                nav_valid=1,
+                nav_state=3,
+                nav_stale=0,
+                nav_degraded=0,
+                nav_fault_code=0,
+                nav_status_flags=(1 << 6) | (1 << 7),
+                fault_state=0,
+                health_state=1,
+                command_status=0,
+                last_fault_code=0,
+                command_fault_code=0,
+                active_controller="manual",
+                desired_controller="manual",
+                consecutive_failures=0,
+                auto_fail_limit=5,
+                status_seq=44,
+                command_cmd_seq=0,
+            ),
+            last_rx_ns=3_000_000_000,
+        )
+
+        state = build_overview_state(
+            snapshot,
+            GcsServiceState(session_established=True, session_id=8, link_alive=True),
+            now_ns=3_010_000_000,
+            context=OverviewContext(
+                rov_addr="127.0.0.1:14550",
+                bind_addr="0.0.0.0:14551",
+            ),
+        )
+
+        self.assertEqual(state.device.summary, "IMU + DVL")
+        self.assertEqual(state.navigation.summary, "Relative Nav")
+        self.assertIn("这不代表绝对定位", state.navigation.detail)
 
     def test_presenter_surfaces_ros2_advisory_recovery_text(self) -> None:
         snapshot = TelemetrySnapshot(
@@ -133,7 +182,7 @@ class GuiOverviewPresenterTests(unittest.TestCase):
         self.assertEqual(state.connection.summary, "Disconnected")
         self.assertEqual(state.command.summary, "Idle")
         self.assertEqual(state.faults.severity, "warn")
-        self.assertIn("TUI-only", state.footer)
+        self.assertIn("TUI teleop", state.footer)
         self.assertIn("one key at a time", state.footer)
 
 

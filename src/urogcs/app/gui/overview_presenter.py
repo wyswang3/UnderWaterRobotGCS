@@ -103,7 +103,10 @@ def _build_footer(context: OverviewContext) -> str:
         return context.last_log
     if context.advisory_recommended_action and context.advisory_summary not in {"", "ok"}:
         return f"advisory={context.advisory_summary}; action={context.advisory_recommended_action}"
-    return "GUI ready. Waiting for telemetry updates. Teleop note: keyboard motion is TUI-only and one key at a time."
+    return (
+        "Primary lane: supervisor + GCS TUI teleop. GUI is read-only status/motion observer. "
+        "Keyboard motion remains TUI-only and one key at a time."
+    )
 
 
 def _build_connection_card(
@@ -168,58 +171,73 @@ def _build_device_card(vm: DashboardViewModel) -> OverviewCardState:
         )
 
     st = vm.status
-    imu_state = _device_state(st.imu_online, st.imu_reconnecting, st.imu_mismatch)
-    dvl_state = _device_state(st.dvl_online, st.dvl_reconnecting, st.dvl_mismatch)
+    imu_state = st.imu_state
+    dvl_state = st.dvl_state
 
-    if "mismatch" in {imu_state, dvl_state}:
-        overall = "Mismatch"
+    if "format_invalid" in {imu_state, dvl_state}:
+        overall = "Format Invalid"
         severity = "crit"
-    elif "reconnecting" in {imu_state, dvl_state}:
-        overall = "Reconnecting"
+    elif "stale" in {imu_state, dvl_state}:
+        overall = "Stale / Reconnecting"
         severity = "warn"
-    elif imu_state == "online" and dvl_state == "online":
-        overall = "Online"
+    elif st.capability_level == "relative_nav":
+        overall = "IMU + DVL"
         severity = "ok"
-    elif imu_state == "device_offline" and dvl_state == "device_offline":
-        overall = "Offline"
-        severity = "crit"
+    elif st.capability_level == "attitude_feedback":
+        overall = "IMU Only"
+        severity = "info"
     else:
-        overall = "Degraded"
-        severity = "warn"
+        overall = "Control Only"
+        severity = "info"
 
-    detail = f"IMU={imu_state}\nDVL={dvl_state}"
+    detail = (
+        f"IMU={imu_state} note={st.imu_state_detail}\n"
+        f"DVL={dvl_state} note={st.dvl_state_detail}\n"
+        f"Volt32=not present in STATUS; use supervisor/device-scan/preflight for not_present/open_failed/permission diagnostics\n"
+        f"observation_level={st.capability_level}"
+    )
     return OverviewCardState("Devices", overall, detail, severity)
 
 
 def _build_navigation_card(vm: DashboardViewModel) -> OverviewCardState:
     if vm.status is None:
         return OverviewCardState(
-            title="Navigation",
+            title="Motion Info",
             summary="Unknown",
-            detail="No navigation telemetry decoded yet.",
+            detail="No runtime status is available yet, so capability and motion observation remain unknown.",
             severity="warn",
         )
 
     st = vm.status
-    if not st.nav_valid:
-        summary = "Invalid"
-        severity = "crit"
-    elif st.nav_stale:
-        summary = "Stale"
-        severity = "crit"
-    elif st.nav_degraded:
-        summary = "Degraded"
-        severity = "warn"
+    capability_titles = {
+        "control_only": "Control Only",
+        "attitude_feedback": "Attitude Feedback",
+        "relative_nav": "Relative Nav",
+        "full_stack_preview": "Full Stack Preview",
+    }
+    capability_fields = {
+        "control_only": "minimal runtime state only",
+        "attitude_feedback": "roll/pitch/yaw, gyro, accel",
+        "relative_nav": "roll/pitch/yaw, gyro, accel, velocity, relative_position",
+        "full_stack_preview": "reserved",
+    }
+    summary = capability_titles.get(st.capability_level, "Control Only")
+    if st.capability_level == "relative_nav":
+        severity = "ok" if st.nav_valid and not st.nav_stale and not st.nav_degraded else "warn"
     else:
-        summary = "Ok"
-        severity = "ok"
+        severity = "info"
 
     detail = (
-        f"state={st.nav_state} health={st.health_state}\n"
+        f"observation_level={st.capability_level}\n"
+        f"note={st.capability_summary}\n"
+        f"usable={capability_fields.get(st.capability_level, 'minimal runtime state only')}\n"
+        f"observe={st.motion_observation_hint}\n"
+        f"sensor_diag=imu:{st.imu_state},dvl:{st.dvl_state}\n"
+        f"runtime_nav={st.nav_state} health={st.health_state}\n"
         f"diag={st.nav_diagnostic_summary}\n"
         f"fault={st.nav_fault_name}({st.nav_fault_code})"
     )
-    return OverviewCardState("Navigation", summary, detail, severity)
+    return OverviewCardState("Motion Info", summary, detail, severity)
 
 
 def _build_control_card(vm: DashboardViewModel) -> OverviewCardState:

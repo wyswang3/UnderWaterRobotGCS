@@ -17,5 +17,10 @@ fi
 
 export PYTHONPATH="$ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
-"$PYTHON_BIN" -m urogcs.tools.preflight_check
+# GUI is a read-only observer; default to an ephemeral bind port so it can run
+# alongside the TUI without fighting over the fixed telemetry port.
+: "${UROGCS_GUI_BIND_PORT:=0}"
+export UROGCS_GUI_BIND_PORT
+
+"$PYTHON_BIN" -m urogcs.tools.preflight_check --bind-port "$UROGCS_GUI_BIND_PORT"
 exec "$PYTHON_BIN" -m urogcs.app.gui_main "$@"

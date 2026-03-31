@@ -110,7 +110,7 @@ class OverviewMainWindow(QMainWindow):
 
         self._connection_card = StatusCard("Connection")
         self._device_card = StatusCard("Devices")
-        self._navigation_card = StatusCard("Navigation")
+        self._navigation_card = StatusCard("Motion Info")
         self._control_card = StatusCard("Control")
         self._command_card = StatusCard("Command")
         self._fault_card = StatusCard("Fault Summary")
@@ -293,6 +293,14 @@ class OverviewMainWindow(QMainWindow):
             self._disconnect_button.setEnabled(False)
             self._refresh_dashboard()
             return
+
+        # If GUI used an ephemeral bind port (0), reflect the actual chosen port in the UI header.
+        cli = service.client
+        if cli is not None:
+            try:
+                self._cfg.bind_ip, self._cfg.bind_port = cli.bind_addr
+            except Exception:
+                pass
 
         self._service = service
         self._connect_button.setEnabled(False)
