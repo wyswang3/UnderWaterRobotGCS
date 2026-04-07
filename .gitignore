@@ -9,9 +9,13 @@ __pycache__/
 
 .venv/
 .env
+.vscode/
+.idea/
 
 *.log
 *.pcap
 *.bin
 *.tmp
-
+*.swp
+*.swo
+*~
