@@ -26,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="select the dashboard data source; ROS2 is a read-only mirror preview path",
     )
+    parser.add_argument(
+        "--debug-session",
+        action="store_true",
+        help="enable explicit GCS session debug logging for handshake and UDP packets",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -40,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     cfg = GuiConfig.from_env()
     if args.telemetry_source is not None:
         cfg.telemetry_source = args.telemetry_source
+    if args.debug_session:
+        cfg.session_debug = True
     auto_connect = cfg.auto_connect and not args.no_auto_connect
 
     # Allow CI/headless smoke tests to request a finite GUI lifetime without

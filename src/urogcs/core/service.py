@@ -59,6 +59,7 @@ class GcsServiceConfig:
     handshake_timeout_s: float = 2.0
 
     recv_timeout_ms: Optional[int] = None
+    session_debug: bool = False
 
     def effective_recv_timeout_ms(self) -> int:
         """
@@ -226,6 +227,7 @@ class GcsService:
             recv_timeout_ms=self.cfg.effective_recv_timeout_ms(),
             on_status=_on_status,
             on_log=_on_log,
+            debug=self.cfg.session_debug,
         )
 
         self.last_error = ""

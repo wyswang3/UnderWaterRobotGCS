@@ -40,6 +40,7 @@ class TuiConfig:
 
     handshake_timeout_s: float = 2.0
     print_hz: int = 10
+    session_debug: bool = False
 
     @staticmethod
     def from_env() -> "TuiConfig":
@@ -61,6 +62,7 @@ class TuiConfig:
             os.getenv("UROGCS_HANDSHAKE_TIMEOUT_S", str(cfg.handshake_timeout_s))
         )
         cfg.print_hz = int(os.getenv("UROGCS_PRINT_HZ", str(cfg.print_hz)))
+        cfg.session_debug = os.getenv("UROGCS_SESSION_DEBUG", "0") not in {"0", "", "false", "False"}
         return cfg
 
 

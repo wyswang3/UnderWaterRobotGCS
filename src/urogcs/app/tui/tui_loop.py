@@ -75,6 +75,7 @@ def run_tui(cfg: TuiConfig) -> int:
         poll_hz=cfg.poll_hz,
         heartbeat_hz=cfg.heartbeat_hz,
         handshake_timeout_s=cfg.handshake_timeout_s,
+        session_debug=cfg.session_debug,
     )
     svc = GcsService(svc_cfg, on_status=on_status, on_log=on_log)
 

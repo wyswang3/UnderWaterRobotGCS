@@ -8,8 +8,20 @@ from urogcs.telemetry.alarms import Alarm, AlarmLevel, evaluate_alarms, AlarmPol
 from urogcs.telemetry.model import TelemetrySnapshot
 
 
-def derive_capability_level(*, imu_online: bool, dvl_online: bool) -> str:
-    if imu_online and dvl_online:
+def derive_capability_level(
+    *,
+    imu_online: bool,
+    dvl_online: bool,
+    nav_valid: bool,
+    nav_stale: bool,
+    nav_degraded: bool,
+) -> str:
+    # Motion capability must follow the fresh runtime nav snapshot, not only
+    # raw device-online bits. Otherwise the UI overstates navigation readiness
+    # when SHM hops are stale or the runtime has already downgraded the sample.
+    if not nav_valid or nav_stale:
+        return 'control_only'
+    if imu_online and dvl_online and not nav_degraded:
         return 'relative_nav'
     if imu_online:
         return 'attitude_feedback'
@@ -157,6 +169,9 @@ def build_dashboard_viewmodel(
     capability_level = derive_capability_level(
         imu_online=st.imu_online,
         dvl_online=st.dvl_online,
+        nav_valid=bool(st.nav_valid),
+        nav_stale=bool(st.nav_stale),
+        nav_degraded=bool(st.nav_degraded),
     )
     imu_state, imu_state_detail = derive_sensor_observation_state(
         'imu',

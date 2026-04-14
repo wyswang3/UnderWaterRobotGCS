@@ -245,6 +245,7 @@ class OverviewMainWindow(QMainWindow):
             poll_hz=self._cfg.poll_hz,
             heartbeat_hz=self._cfg.heartbeat_hz,
             handshake_timeout_s=self._cfg.handshake_timeout_s,
+            session_debug=self._cfg.session_debug,
         )
         return GcsService(svc_cfg, on_status=self._on_status, on_log=self._on_log)
 

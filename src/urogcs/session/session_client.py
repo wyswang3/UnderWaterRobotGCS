@@ -134,7 +134,8 @@ class GcsSessionClient:
         self.on_log = on_log
 
         # -------- Debug 开关初始化 --------
-        env_dbg = os.getenv("UROGCS_DEBUG", "0").strip() not in ("0", "", "false", "False")
+        env_dbg_raw = os.getenv("UROGCS_SESSION_DEBUG", os.getenv("UROGCS_DEBUG", "0"))
+        env_dbg = env_dbg_raw.strip() not in ("0", "", "false", "False")
         dbg_enabled = env_dbg if debug is None else bool(debug)
         self.dbg = DebugConfig(enabled=dbg_enabled)
 

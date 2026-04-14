@@ -108,6 +108,7 @@ def main() -> int:
         heartbeat_hz=base_cfg.heartbeat_hz,
         handshake_timeout_s=base_cfg.handshake_timeout_s,
         print_hz=base_cfg.print_hz,
+        session_debug=base_cfg.session_debug,
     )
     return run_preflight(cfg, bind_check=not args.skip_bind_check)
 

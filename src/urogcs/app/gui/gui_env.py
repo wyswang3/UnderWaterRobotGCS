@@ -30,6 +30,7 @@ class GuiConfig:
     auto_connect: bool = True
     telemetry_source: str = "udp"
     window_title: str = "UnderWaterRobotGCS"
+    session_debug: bool = False
 
     @staticmethod
     def from_env() -> "GuiConfig":
@@ -53,4 +54,5 @@ class GuiConfig:
         cfg.auto_connect = os.getenv("UROGCS_GUI_AUTOCONNECT", "1") not in {"0", "false", "False"}
         cfg.telemetry_source = os.getenv("UROGCS_GUI_SOURCE", cfg.telemetry_source).strip().lower() or cfg.telemetry_source
         cfg.window_title = os.getenv("UROGCS_GUI_TITLE", cfg.window_title)
+        cfg.session_debug = os.getenv("UROGCS_SESSION_DEBUG", "0") not in {"0", "", "false", "False"}
         return cfg
