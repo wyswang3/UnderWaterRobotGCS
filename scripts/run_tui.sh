@@ -6,18 +6,27 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${ROOT_DIR}"
 
 PRECHECK_ONLY=0
-if [[ "${1:-}" == "--preflight-only" ]]; then
-  PRECHECK_ONLY=1
-  shift
-fi
+declare -a APP_ARGS=()
+while [[ $# -gt 0 ]]; do
+  case "${1}" in
+    --preflight-only)
+      PRECHECK_ONLY=1
+      shift
+      ;;
+    *)
+      APP_ARGS+=("${1}")
+      shift
+      ;;
+  esac
+done
 
-if [[ $# -ne 0 ]]; then
-  echo "[ERR] Unsupported arguments: $*"
-  echo "[INFO] Usage: scripts/run_tui.sh [--preflight-only]"
-  exit 2
-fi
-
-if [[ -x ".venv/bin/python" ]]; then
+if [[ -n "${UROGCS_PYTHON_BIN:-}" ]]; then
+  if [[ ! -x "${UROGCS_PYTHON_BIN}" ]]; then
+    echo "[ERR] UROGCS_PYTHON_BIN is not executable: ${UROGCS_PYTHON_BIN}"
+    exit 2
+  fi
+  PYTHON_BIN="${UROGCS_PYTHON_BIN}"
+elif [[ -x ".venv/bin/python" ]]; then
   PYTHON_BIN=".venv/bin/python"
 elif command -v python3 >/dev/null 2>&1; then
   PYTHON_BIN="python3"
@@ -37,6 +46,7 @@ echo "============================================"
 echo ""
 echo "[INFO] Project root: ${ROOT_DIR}"
 echo "[INFO] Python: ${PYTHON_BIN}"
+echo "[INFO] Python version: $("${PYTHON_BIN}" --version 2>&1)"
 echo ""
 
 "${PYTHON_BIN}" -m urogcs.tools.preflight_check
@@ -51,4 +61,4 @@ echo ""
 echo "[INFO] Starting TUI"
 echo "[INFO] Press Ctrl+C to exit"
 echo ""
-exec "${PYTHON_BIN}" -m urogcs.app.tui.tui_main
+exec "${PYTHON_BIN}" -m urogcs.app.tui.tui_main "${APP_ARGS[@]}"

@@ -16,6 +16,13 @@ __pycache__/
 *.pcap
 *.bin
 *.tmp
+*.bak
+*.orig
+*.rej
 *.swp
 *.swo
 *~
+.coverage
+.coverage.*
+htmlcov/
+.DS_Store
