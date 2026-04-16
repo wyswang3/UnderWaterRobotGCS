@@ -164,4 +164,7 @@ GCS 不负责以下事情：
 
 这份 README 面向技术开发团队和代码学习者，不是操作工说明书。
 
-如果你要看现场操作步骤，请转到控制仓里的 [操作说明.md](/home/wys/orangepi/UnderwaterRobotSystem/OrangePi_STM32_for_ROV/pwm_control_program/docs/操作说明.md)。
+如果你要看 GCS 当前操作和协议说明，请先读：
+
+- [docs/operator_guide.md](/home/wys/orangepi/UnderWaterRobotGCS/docs/operator_guide.md)
+- [docs/protocol.md](/home/wys/orangepi/UnderWaterRobotGCS/docs/protocol.md)

@@ -1,283 +1,351 @@
+# 上位机（GCS）操作与开发对照指南
+# GCS Operator And Developer-Oriented Guide
+
+> Audience:
+> operators, bring-up engineers, and GCS developers who need the real current behavior.
+>
+> Goal:
+> describe how to launch the current GCS, how to switch modes correctly,
+> and how to interpret what the UI is telling you.
 
 ---
 
-````md
-# 上位机（GCS）操作员指南  
-# Operator Guide – Ground Control Station (GCS)
+## 1. 先理解当前产品形态 / Understand The Current Product Shape First
 
-> 适用对象：  
-> **第一次参与水下实验的操作员 / 新人 / 非核心开发人员**  
->  
-> 本文档说明：  
-> **如何启动上位机（GCS），让其与香橙派（ROV）成功通信，并通过键盘遥控机器人。**
+当前 GCS 不是“一个统一 GUI 控制台”，而是两条 lane：
 
----
+1. **TUI**
+   - 当前主控制面
+   - 当前主 teleop lane
+   - 支持键盘控制、模式切换、arm/disarm、estop
+2. **GUI**
+   - 当前只读 overview dashboard
+   - 主要用于状态观察、Motion Info、Fault Summary、advisory
 
-## 0. 系统整体说明（先看）
+Therefore:
 
-### 中文说明
-
-当前系统采用 **“上位机 + 香橙派 + STM32”** 三层结构：
-
-- **上位机（GCS）**  
-  - 运行在操作员电脑上（Windows / Linux）
-  - 负责：键盘输入、控制指令发送、状态显示
-- **香橙派（OrangePi）**  
-  - 运行在机器人本体上
-  - 负责：通信、控制逻辑、安全保护
-- **STM32**  
-  - 只负责最底层 PWM 输出（推进器）
-
-⚠️ **操作员只需要关心 GCS 和香橙派是否“连通”**
+- 想真实控制机器人，用 TUI
+- 想同时观察状态，可并行开 GUI
 
 ---
 
-## 1. 操作前检查清单（Checklist）
+## 2. 默认网络与端口 / Default Network And Ports
 
-在启动任何程序前，请确认：
+默认值：
 
-### 1.1 硬件
+- ROV IP：`192.168.2.24`
+- ROV 端口：`14550`
+- TUI bind 端口：`14551`
+- GUI bind 端口：`0`（ephemeral）
 
-- [ ] 机器人已通电
-- [ ] 香橙派已启动（指示灯正常）
-- [ ] 网络连接正常（网线 / 交换机 / 路由器）
-- [ ] 操作员电脑 与 香橙派 在 **同一局域网**
+为什么 GUI 是 `0`：
 
-### 1.2 网络确认（非常重要）
+- 避免和 TUI 抢固定本地端口
+- 允许 GUI 与 TUI 同时运行
 
-在操作员电脑上执行：
+环境变量覆盖：
 
-```bash
-ping <香橙派IP地址>
-````
-
-例如：
-
-```bash
-ping 192.168.2.24
-```
-
-* 能 ping 通 → 继续
-* ping 不通 → **不要启动 GCS，先解决网络**
+- `UROGCS_ROV_IP`
+- `UROGCS_ROV_PORT`
+- `UROGCS_BIND_PORT`
+- `UROGCS_GUI_BIND_PORT`
 
 ---
 
-## 2. 启动香橙派端程序（ROV 侧）
+## 3. 启动前检查 / Preflight Checklist
 
-> ⚠️ 如果香橙派已配置为“开机自启动”，此步骤可跳过
-> ⚠️ 如果不确定，请按以下步骤人工启动
+### 3.1 网络
 
-### 2.1 SSH 登录香橙派
-
-当前实验环境默认配置如下（如有变更以负责人通知为准）：
-
-- IP 地址：`192.168.2.24`
-- 用户名：`orangepi`
-- 密码：`orangepi`
+先确认操作员电脑和 OrangePi 在同一局域网：
 
 ```bash
-ssh orangepi@<香橙派IP>(192.168.2.24)
-用户名：orangepi
-密码：orangepi
+ping <OrangePi_IP>
 ```
 
+若 ping 不通，不要继续排查 GCS UI，先修网络。
 
-### 2.2 启动通信与控制程序
+### 3.2 ROV 侧准备
 
-进入项目目录，例如：
+ROV 侧至少应有：
 
-```bash
-cd ~/OrangePi_STM32_for_ROV/build
-```
+- `gcs_server`
+- `pwm_control_program`
 
-启动主程序（示例）：
-
-```bash
-./pwm_control_program/pwm_control_program
-```
-
-你应该看到类似输出：
-
-```
-[INFO] pwm_control_program starting...
-[INFO] comm_gcs listening on UDP port XXXX
-```
-
-**此时香橙派已进入“等待上位机连接”状态。**
+如果你只看得到 GCS 握手成功，但没有 STATUS，很可能是通信面活着、运行态还没真正起来。
 
 ---
 
-## 3. 启动上位机（GCS）
+## 4. 启动方式 / Launch Paths
 
-### 3.1 进入 GCS 项目目录
+### 4.1 TUI
 
-在操作员电脑上：
-
-```bash
-cd UnderWaterRobotGCS
-```
-
-### 3.2 启动键盘遥控模式（推荐新人）
-
-#### Windows（PowerShell）
-
-```powershell
-scripts\run_tui.ps1
-```
-
-#### Linux / macOS
+推荐：
 
 ```bash
-PYTHONPATH=src python -m urogcs.app.tui.tui_main
+cd /home/wys/orangepi/UnderWaterRobotGCS
+bash scripts/run_tui.sh
 ```
+
+需要显式开启 session debug：
+
+```bash
+cd /home/wys/orangepi/UnderWaterRobotGCS
+bash scripts/run_tui.sh --debug-session
+```
+
+### 4.2 GUI
+
+推荐：
+
+```bash
+cd /home/wys/orangepi/UnderWaterRobotGCS
+bash scripts/run_gui.sh
+```
+
+GUI 默认是 observer lane。若只想本地开界面但先不握手：
+
+```bash
+cd /home/wys/orangepi/UnderWaterRobotGCS
+PYTHONPATH=src python -m urogcs.app.gui_main --no-auto-connect
+```
+
+### 4.3 Windows note
+
+Windows 当前不是正式键盘 teleop lane：
+
+- 可以做最小观测和协议开发
+- 不要把它当成完整 TUI teleop 替代
 
 ---
 
-## 4. 建立 GCS ↔ ROV 通信（最关键一步）
+## 5. 握手成功后你应该看到什么 / What Success Looks Like
 
-### 4.1 正常情况（成功）
+正常握手日志大致如下：
 
-启动 GCS 后，你应该看到类似日志：
-
-```
+```text
 [HS] sent CONNECT_REQ
-[HS] CONNECT_ACK ok: session_id=12345678
+[HS] got CONNECT_ACK ...
 [HS] sent CONNECT_CONFIRM
 ```
 
-这表示：
+TUI 启动成功后应看到：
 
-* 上位机 与 香橙派 **已成功建立会话**
-* 后续控制命令将被接受
+- `handshake OK`
+- `session_id=...`
+- HUD 开始刷新
 
-### 4.2 异常情况（失败）
+此时还要继续看两件事：
 
-| 现象               | 可能原因     | 处理方式        |
-| ---------------- | -------- | ----------- |
-| 一直无 CONNECT_ACK  | 网络不通     | 检查 IP / 防火墙 |
-| INVALID_SESSION  | 香橙派程序未启动 | 回到第 2 步     |
-| CRC / BAD_FORMAT | 版本不匹配    | 联系开发人员      |
+1. `session_established`
+2. `link_alive`
 
----
-
-## 5. 键盘遥控说明（Manual Mode）
-
-### 5.1 切换到手动模式
-
-在 GCS 启动后，默认应为 **Manual 模式**。
-如需手动切换，请按（示例）：
-
-```
-M
-```
-
-屏幕状态应显示：
-
-```
-Mode: Manual
-```
+握手成功不等于控制链已经健康。
 
 ---
 
-### 5.2 键盘控制映射（默认）
+## 6. 当前实际操作顺序 / Current Correct Operation Order
 
-| 键位    | 动作             |
-| ----- | -------------- |
-| W / S | 前进 / 后退（surge） |
-| A / D | 左移 / 右移（sway）  |
-| Q / E | 上浮 / 下潜（heave） |
-| ← / → | 左转 / 右转（yaw）   |
-| ↑ / ↓ | 俯仰（pitch）      |
-| Z / C | 横滚（roll）       |
+当前建议顺序不是“随便按键”，而是：
 
-> 所有控制量均为 **归一化 [-1, 1]**，非直接 PWM
+1. 建立会话
+2. 确认 STATUS 在刷新
+3. 如有需要，先 clear estop
+4. arm
+5. 先保持 `Manual`
+6. 小幅单键 teleop
+7. 再考虑是否请求 `Auto`
 
----
+一句话版：
 
-## 6. 急停（ESTOP）操作（必须记住）
-
-### 6.1 触发急停
-
-按下：
-
-```
-SPACE
-```
-
-效果：
-
-* 所有推进器立即停止
-* ROV 进入安全状态
-* 状态栏显示 `ESTOP = ON`
-
-### 6.2 解除急停
-
-再次按：
-
-```
-SPACE
-```
-
-> ⚠️ 解除急停前，请确认周围安全
+> handshake -> status alive -> clear estop -> arm -> Manual small motion -> then evaluate Auto
 
 ---
 
-## 7. 状态监控（Telemetry）
+## 7. 模式切换 / Control Mode Switching
 
-GCS 界面会显示以下关键信息：
+### 7.1 当前模式键
 
-* Session 状态（是否连接）
-* Link Alive（链路是否健康）
-* 当前控制模式
-* 急停状态
-* 时间戳
+TUI 当前不是旧文档里的 `M` 切模式，而是：
 
-如果看到：
+- `1` -> request `Manual`
+- `2` -> request `Auto`
+- `3` -> request `Failsafe`
 
-```
-link_alive = false
-```
+### 7.2 很重要：本地请求不等于远端已切换
 
-说明通信异常，应立即停止操作。
+GCS 有两个概念：
+
+- local requested mode
+- remote actual mode
+
+你按下 `2` 只是请求 `Auto`。
+
+如果远端 STATUS 仍显示：
+
+- `Manual`
+- `Failsafe`
+
+说明 remote side 没接受切换。
+
+### 7.3 为什么 Auto 可能不生效
+
+常见原因：
+
+- 导航不可信
+- nav stale / degraded / invalid
+- controller 不可用
+- arm / estop / mode 前提不满足
+
+因此当前开发和操作口径都应是：
+
+- `Auto` is request-based
+- remote runtime mode is authoritative
 
 ---
 
-## 8. 常见错误与处理（新人必看）
+## 8. Arm / Disarm / E-Stop / Clear E-Stop
 
-### 8.1 机器人不动
+当前 TUI 离散控制键：
+
+| 键位 | 语义 |
+| --- | --- |
+| `space` | toggle E-Stop |
+| `m` | clear estop + center DOF |
+| `,` / `，` | Arm |
+| `.` / `。` | Disarm |
+
+注意：
+
+- `space` 是 toggle，不是“按住有效”
+- `m` 会同时请求 clear estop，并把本地 DOF 清零
+- clear estop 请求不代表 remote 一定立即解除
+
+所以操作上不要只看“按过键了”，要看远端 STATUS 是否真的变化。
+
+---
+
+## 9. 当前键盘 teleop 真实映射 / Actual Keyboard Teleop Mapping
+
+### 9.1 Motion keys
+
+| 键位 | 轴 |
+| --- | --- |
+| `w/s` | surge +/- |
+| `a/d` | sway -/+ |
+| `h/g` | heave +/- |
+| `q/e` | yaw +/- |
+| `r/t` | roll +/- |
+| `f/v` | pitch +/- |
+
+### 9.2 Throttle
+
+| 键位 | 动作 |
+| --- | --- |
+| `-` / `_` | throttle down |
+| `=` / `+` | throttle up |
+
+### 9.3 One-key-only rule
+
+当前实现不是自由组合运动，而是：
+
+- 一次只接受一个运动键
+- 多个运动键同时按下会被忽略
+- 系统按衰减逻辑回零
+
+这是刻意设计，不是 bug。
+
+原因：
+
+- 降低误操作
+- 减少运动学含义不透明
+- 降低瞬时功耗风险
+
+---
+
+## 10. GUI 该怎么看 / How To Read The GUI Correctly
+
+GUI 当前应被理解为：
+
+- `Connection`：会话与链路状态
+- `Devices`：IMU / DVL 观察状态
+- `Motion Info`：当前 runtime nav 允许展示到什么层级
+- `Control`：armed / mode / failsafe / controller
+- `Command`：最近命令与 ACK/runtime 状态
+- `Fault Summary`：告警与建议动作
+
+关键提醒：
+
+- GUI 当前不是主控输入面
+- GUI footer 已明确写明：primary lane is TUI teleop
+
+---
+
+## 11. 如何理解 Motion Info / How To Read Motion Info
+
+当前 GUI/TUI 不再把“设备在线”直接显示成“完整导航可用”。
+
+显示逻辑是：
+
+- `Control Only`
+  - 只有最小状态可依赖
+- `Attitude Feedback`
+  - IMU 在线且 runtime nav 允许
+- `Relative Nav`
+  - IMU + DVL 在线且 fresh/valid/not degraded
+
+所以如果你看到：
+
+- IMU/DVL online
+- 但 Motion Info 仍是 `Control Only`
+
+这并不必然是 GUI 错了，可能是 runtime nav 当前 stale/invalid。
+
+---
+
+## 12. 常见误判 / Common Misreadings
+
+### 12.1 “我按了 Auto，为什么还在 Manual？”
+
+因为 GCS 只发 request，remote 可能拒绝。
+
+### 12.2 “握手成功了，为什么机器人还不动？”
 
 检查顺序：
 
-1. 是否已建立 Session
-2. 是否处于 Manual 模式
-3. 是否触发了 ESTOP
-4. 香橙派程序是否仍在运行
+1. STATUS 是否在刷新
+2. remote 是否 armed
+3. remote estop 是否清除
+4. 当前 remote mode 是什么
+5. failsafe 是否激活
 
-### 8.2 有延迟 / 抖动
+### 12.3 “我同时按两个方向，为什么没反应？”
 
-* 检查网络质量
-* 确认没有同时运行多个 GCS 实例
-* 关闭视频流等高带宽任务
+因为当前 teleop 明确只接受一个运动键。
 
----
+### 12.4 “Windows 上为什么没法像 Linux 一样键盘飞？”
 
-## 9. 操作纪律（非常重要）
-
-* ❌ 不要跳过 ESTOP 测试
-* ❌ 不要在通信异常时强行操作
-* ❌ 不要直接改动香橙派参数
-* ✅ 所有异常第一时间汇报
+因为当前 Windows lane 不是正式 keyboard teleop implementation。
 
 ---
 
-## 10. 一句话总结（给新人）
+## 13. 给开发者的升级建议 / Upgrade Notes For Developers
 
-> **看到 CONNECT 成功 → 切到 Manual → 小幅按键测试 → 随时准备 ESTOP**
+当前 GCS 继续升级时，建议遵守以下顺序：
+
+1. 先稳住 TUI 主控制 lane
+2. 把 sent / ack / runtime executed 三层状态表达得更清楚
+3. 让 GUI 复用更多运行态 guidance，但不提前接管控制 authority
+4. 只把 ROS2 用在只读 mirror / diagnostics
+5. Auto controller 选择、MotorTest 等功能在协议明确后再加
+
+当前不建议做的事：
+
+- 把 GUI 直接宣传成主控面
+- 在 ROS2 上发送控制 authority
+- 让 GCS 承担最终安全裁决
 
 ---
 
-**End of Operator Guide**
+## 14. 当前最短提醒 / Short Reminder
 
-```
-
----
+> Use TUI to control, use GUI to observe, trust remote STATUS over local wishes, and treat Auto as a gated request rather than a guaranteed state change.
