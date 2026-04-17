@@ -1,3 +1,14 @@
+"""Wire packet build/parse helpers for the Python GCS client.
+
+作用：
+- 负责 Python 侧 GCS 报文头构造、CRC 计算、整包编码和收包校验；
+- 保证 Python 客户端与 C++ `proto_gcs` 协议保持一致。
+
+实现思路：
+- 把 header/payload 的编码、校验和 ACK 判定收口在同一模块；
+- 上层 session/service 只处理业务消息，不重复关心字节级协议细节。
+"""
+
 from __future__ import annotations
 
 import struct

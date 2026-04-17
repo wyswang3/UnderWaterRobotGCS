@@ -1,3 +1,14 @@
+"""Overview dashboard presenter for the GUI home page.
+
+作用：
+- 把 TelemetrySnapshot 和 GcsServiceState 组合成首页卡片状态；
+- 统一生成 connection/device/navigation/control/fault 等概览文案。
+
+实现思路：
+- presenter 层只做状态折叠和显示语义映射，不直接操作 Qt 控件；
+- 让 GUI 渲染层与业务解释层分离，后续 TUI/其他前端也能复用同一套判断口径。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

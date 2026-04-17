@@ -1,4 +1,14 @@
-# src/urogcs/telemetry/model.py
+"""Runtime telemetry snapshot model shared by GCS views and alarms.
+
+作用：
+- 保存最近一次成功解码的 STATUS 以及对应接收时间；
+- 提供 UI/告警层常用的只读派生属性，统一解释 mode/nav/health 等状态。
+
+实现思路：
+- 快照层只缓存权威遥测与轻量派生值，不引入新的控制语义；
+- TUI、GUI 和 alarm 逻辑都围绕同一个 TelemetrySnapshot 读取，减少状态漂移。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

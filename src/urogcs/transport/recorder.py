@@ -1,4 +1,14 @@
-# src/urogcs/transport/recorder.py
+"""Raw packet recorder for GCS-side transport debugging and replay.
+
+作用：
+- 以紧凑二进制格式记录 GCS 收发的原始 UDP payload；
+- 为 replay、pcap 导出和现场问题复盘保留最小原始证据。
+
+实现思路：
+- 记录器不理解业务协议，只按方向、时间戳和 payload 原样落盘；
+- 回放和分析工具在后续阶段复用同一文件格式，避免多套抓包格式并存。
+"""
+
 from __future__ import annotations
 
 import os

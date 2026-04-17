@@ -1,4 +1,14 @@
-# src/urogcs/telemetry/ui_viewmodels.py
+"""Dashboard-oriented telemetry view models for GCS frontends.
+
+作用：
+- 把 TelemetrySnapshot 转成前端直接消费的 link/status/alarm 视图模型；
+- 统一 motion capability、sensor observation 和告警摘要的显示口径。
+
+实现思路：
+- 这一层承接协议/遥测原始字段，输出 UI 友好的稳定结构；
+- 前端只渲染 viewmodel，不在页面里重复实现导航可信度和设备状态判定。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

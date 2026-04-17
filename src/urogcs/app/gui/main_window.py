@@ -1,3 +1,14 @@
+"""Qt main window for the GCS overview dashboard.
+
+作用：
+- 组织 GUI 页面、定时刷新和操作按钮；
+- 连接 GcsService 与 presenter，把运行态快照转换成可视化卡片和操作反馈。
+
+实现思路：
+- 窗口层负责控件生命周期、定时器和用户交互；
+- 状态解释和文案计算尽量交给 presenter/viewmodel 模块，避免 UI 代码里混入大量业务判断。
+"""
+
 from __future__ import annotations
 
 import time

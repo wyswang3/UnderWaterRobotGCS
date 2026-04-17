@@ -1,4 +1,14 @@
-# src/urogcs/telemetry/alarms.py
+"""Conservative alarm evaluation for operator-facing GCS telemetry.
+
+作用：
+- 根据当前 TelemetrySnapshot 生成告警列表；
+- 把 link/session/estop/failsafe/nav/fault 等关键状态折叠成稳定的 operator alarm 语义。
+
+实现思路：
+- 这一层只消费已有权威遥测，不重新发明控制或导航状态机；
+- 告警规则集中定义，TUI/GUI 共享同一套阈值和判断口径。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -1,4 +1,14 @@
-# src/urogcs/transport/udp_link.py
+"""Thin UDP transport wrapper used by the Python GCS session client.
+
+作用：
+- 封装 GCS 对 vehicle/gateway 的 UDP 发送、接收和简单链路统计；
+- 为 session_client 提供非阻塞 socket、超时收包和原始包记录能力。
+
+实现思路：
+- 传输层只做 socket 与收发观测，不夹带握手或业务协议状态；
+- 上层 session 层基于这里提供的 datagram 收发接口实现会话语义。
+"""
+
 from __future__ import annotations
 
 import socket

@@ -1,3 +1,14 @@
+"""Detailed execution/navigation presenter helpers for the GUI.
+
+作用：
+- 把 ROS2 mirror 或紧凑 STATUS 中的详细字段整理成执行、导航和供电卡片；
+- 为主窗口提供更细粒度的 detail 文案，而不把格式化逻辑堆在 UI 层。
+
+实现思路：
+- 使用一组纯函数从 frame/snapshot 中取字段、格式化数值并生成 OverviewCardState；
+- 当详细 telemetry 缺失时，明确回退为占位说明，而不是让界面静默显示空白。
+"""
+
 from __future__ import annotations
 
 from typing import Any, Iterable

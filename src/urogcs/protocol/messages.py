@@ -1,4 +1,14 @@
-# src/urogcs/protocol/messages.py
+"""GCS protocol-side payload and status helper models.
+
+作用：
+- 定义 GCS 业务层直接使用的轻量 payload/dataclass；
+- 提供把运行时状态码、导航标志和 fault 折叠成稳定 UI 文本的辅助函数。
+
+实现思路：
+- 保持这一层只表达 Python 侧业务语义，不重复实现底层 wire 编码；
+- 让 TUI/GUI/telemetry 共享同一套状态解释逻辑，避免不同前端各自拼文案。
+"""
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import List

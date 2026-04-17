@@ -1,3 +1,14 @@
+"""PySide6 GUI launcher for the operator dashboard.
+
+作用：
+- 作为 GUI 启动入口，解析命令行和环境变量覆盖；
+- 把 GUI 是否自动连接、数据源选择和调试开关整理成统一启动配置。
+
+实现思路：
+- 入口文件只保留 CLI/环境层 wiring；
+- 具体窗口构建和运行逻辑下沉到 `main_window.py`，避免启动脚本承载 UI 细节。
+"""
+
 from __future__ import annotations
 
 import argparse
