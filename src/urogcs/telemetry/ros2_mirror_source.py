@@ -39,6 +39,7 @@ class Ros2MirrorSnapshotSource:
         self._snapshot = TelemetrySnapshot()
         self._health_advisory = HealthMonitorAdvisory()
         self._state = GcsServiceState()
+        self._last_frame_raw: object | None = None
         self._rclpy = None
         self._node = None
         self._initialised_here = False
@@ -56,6 +57,10 @@ class Ros2MirrorSnapshotSource:
     @property
     def state(self) -> GcsServiceState:
         return self._state
+
+    @property
+    def last_frame_raw(self) -> object | None:
+        return self._last_frame_raw
 
     def start(self) -> bool:
         try:
@@ -104,6 +109,7 @@ class Ros2MirrorSnapshotSource:
         self._initialised_here = False
 
     def _on_telemetry(self, msg: object) -> None:
+        self._last_frame_raw = msg
         snapshot = build_snapshot_from_mirror(msg, now_ns=time.monotonic_ns())
         self._snapshot = snapshot
         status = snapshot.status

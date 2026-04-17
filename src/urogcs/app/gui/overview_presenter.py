@@ -104,8 +104,8 @@ def _build_footer(context: OverviewContext) -> str:
     if context.advisory_recommended_action and context.advisory_summary not in {"", "ok"}:
         return f"advisory={context.advisory_summary}; action={context.advisory_recommended_action}"
     return (
-        "Primary lane: supervisor + GCS TUI teleop. GUI is read-only status/motion observer. "
-        "Keyboard motion remains TUI-only and one key at a time."
+        "Primary lane: supervisor + GCS UDP command lane. GUI supports ESTOP/ARM/mode/DOF actions; "
+        "keyboard motion remains TUI-only and one key at a time."
     )
 
 
@@ -193,6 +193,7 @@ def _build_device_card(vm: DashboardViewModel) -> OverviewCardState:
     detail = (
         f"IMU={imu_state} note={st.imu_state_detail}\n"
         f"DVL={dvl_state} note={st.dvl_state_detail}\n"
+        f"DVL policy={'enabled' if st.dvl_policy_enabled else 'disabled'}\n"
         f"Volt32=not present in STATUS; use supervisor/device-scan/preflight for not_present/open_failed/permission diagnostics\n"
         f"observation_level={st.capability_level}"
     )

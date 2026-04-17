@@ -36,6 +36,7 @@ from urogcs.protocol.codec import (
     encode_set_dof,
     encode_estop,
     encode_arm,          # ARM / DISARM
+    encode_dvl_policy,
 )
 from urogcs.protocol.wire import (
     MsgType,
@@ -751,6 +752,34 @@ class GcsSessionClient:
 
         self._send(pkt)
         self._log(f"[GCS] send_arm armed={int(armed)} seq={self.st.tx_seq}")
+        self.st.tx_seq += 1
+
+    def send_dvl_policy(self, enable: bool, *, submerged_confirmed: bool, ack_req: bool = True) -> None:
+        """
+        发送 DVL operator policy 命令：
+          - enable=True  => 允许 DVL，并要求操作员已确认在水中环境
+          - enable=False => 禁用 DVL，并重启导航预览链回到 IMU-only
+        """
+        flags = Flags.ACK_REQ if ack_req else Flags(0)
+        pkt = encode_dvl_policy(
+            seq=self.st.tx_seq,
+            session_id=self.st.session_id,
+            enable=enable,
+            submerged_confirmed=submerged_confirmed,
+            flags=flags,
+        )
+        self._record_command_tx("DVL_POLICY", self.st.tx_seq)
+        if ack_req:
+            self._pending_ack_seq = self.st.tx_seq
+            self._pending_ack_code = None
+            self._pending_ack_reason = None
+            self._pending_ack_kind = "DVL_POLICY"
+
+        self._send(pkt)
+        self._log(
+            "[GCS] send_dvl_policy "
+            f"enable={int(enable)} submerged_confirmed={int(submerged_confirmed)} seq={self.st.tx_seq}"
+        )
         self.st.tx_seq += 1
 
     # 兼容上层旧调用：request_arm() -> send_arm()

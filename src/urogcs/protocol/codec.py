@@ -195,6 +195,7 @@ _SET_MODE        = struct.Struct("<B B H 16s")     # 20 (kAutoNameMaxLen=16)
 _SET_DOF         = struct.Struct("<6f")            # 24
 _ESTOP           = struct.Struct("<B B H")         # 4
 _ARM             = struct.Struct("<B B H")         # 4  ★ 新增：ArmCmd 结构，与 EstopCmd 相同
+_DVL_POLICY      = struct.Struct("<4B")           # 4
 
 # C++ AckPayload is ONLY 4 bytes: u16 ack_code, u16 reason. ack_seq is in header.ack_seq.
 _ACK_PAYLOAD     = struct.Struct("<H H")           # 4
@@ -299,6 +300,24 @@ def encode_arm(seq: int,
     )
     return build_packet(h, payload)
 
+
+def encode_dvl_policy(
+    seq: int,
+    session_id: int,
+    *,
+    enable: bool,
+    submerged_confirmed: bool,
+    flags: Flags = Flags(0),
+) -> bytes:
+    payload = _DVL_POLICY.pack(
+        1 if enable else 0,
+        1 if submerged_confirmed else 0,
+        0,
+        0,
+    )
+    h = make_header(MsgType.DVL_POLICY, seq, session_id, flags, len(payload))
+    return build_packet(h, payload)
+
 def encode_ack(
     seq: int,
     session_id: int,
@@ -334,7 +353,7 @@ def decode_status(payload: bytes) -> StatusTelemetry:
         (session_established, link_alive, estop, armed,
          mode, failsafe_active, nav_valid, nav_state,
          nav_stale, nav_degraded, fault_state, health_state,
-         command_status, _reserved0,
+         command_status, reserved0,
          last_fault_code,
          command_fault_code, nav_fault_code, nav_status_flags,
          consecutive_failures, auto_fail_limit, status_seq,
@@ -359,6 +378,7 @@ def decode_status(payload: bytes) -> StatusTelemetry:
             fault_state=int(fault_state),
             health_state=int(health_state),
             command_status=int(command_status),
+            dvl_policy_enabled=1 if (int(reserved0) & 0x01) else 0,
             last_fault_code=int(last_fault_code),
             command_fault_code=int(command_fault_code),
             nav_fault_code=int(nav_fault_code),
@@ -376,7 +396,7 @@ def decode_status(payload: bytes) -> StatusTelemetry:
         (session_established, link_alive, estop, armed,
          mode, failsafe_active, nav_valid, nav_state,
          nav_stale, nav_degraded, fault_state, health_state,
-         command_status, _reserved0,
+         command_status, reserved0,
          last_fault_code,
          command_fault_code, _reserved1,
          consecutive_failures, auto_fail_limit, status_seq,
@@ -401,6 +421,7 @@ def decode_status(payload: bytes) -> StatusTelemetry:
             fault_state=int(fault_state),
             health_state=int(health_state),
             command_status=int(command_status),
+            dvl_policy_enabled=1 if (int(reserved0) & 0x01) else 0,
             last_fault_code=int(last_fault_code),
             command_fault_code=int(command_fault_code),
             active_controller=cstr(active16),

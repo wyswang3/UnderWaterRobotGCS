@@ -117,6 +117,7 @@ class StatusViewModel:
     health_state: str
     fault_state: bool
     command_status: str
+    dvl_policy_enabled: bool
     last_fault_code: int
     command_fault_code: int
     active_controller: str
@@ -223,6 +224,7 @@ def build_dashboard_viewmodel(
         health_state=snapshot.health_state_str,
         fault_state=bool(st.fault_state),
         command_status=snapshot.command_status_str,
+        dvl_policy_enabled=bool(getattr(st, 'dvl_policy_enabled', 0)),
         last_fault_code=int(st.last_fault_code),
         command_fault_code=int(st.command_fault_code),
         active_controller=str(st.active_controller),

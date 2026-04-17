@@ -373,6 +373,36 @@ class GcsService:
         except Exception as e:  # noqa: BLE001
             self._handle_log(f"[TX] SET_DOF failed: {e}")
 
+    def request_dvl_policy(
+        self,
+        enable: bool,
+        *,
+        submerged_confirmed: bool,
+        ack_req: bool = True,
+    ) -> None:
+        """
+        请求更新 DVL operator policy，并让车端执行“配置写入 + 导航链重启”。
+
+        注意：
+          - enable=True 时必须由操作员先确认 DVL 已在水中环境；
+          - 该命令不做热切换，车端会按外围策略重启导航相关进程。
+        """
+        if self._cli is None:
+            return
+        try:
+            self._handle_log(
+                "[GCS] request_dvl_policy "
+                f"enable={int(enable)} submerged_confirmed={int(submerged_confirmed)}"
+            )
+            self._cli.send_dvl_policy(
+                enable,
+                submerged_confirmed=submerged_confirmed,
+                ack_req=ack_req,
+            )
+            self._refresh_client_state()
+        except Exception as e:  # noqa: BLE001
+            self._handle_log(f"[TX] DVL_POLICY failed: {e}")
+
     # -------------------------------------------------------------------------
     # 内部回调处理
     # -------------------------------------------------------------------------

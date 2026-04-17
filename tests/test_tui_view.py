@@ -51,14 +51,17 @@ class TuiViewTests(unittest.TestCase):
             tui_view._IS_ANSI_TERMINAL = original_ansi
 
         rendered = buf.getvalue()
-        self.assertIn("[CONN] state=connected", rendered)
+        self.assertIn("[FOCUS] state=CHECK blocker=imu_reconnecting", rendered)
+        self.assertIn("[NEXT ] wait for IMU reconnect", rendered)
+        self.assertIn("[ACT  ] SPACE estop_toggle", rendered)
+        self.assertIn("[MOVE ] W/S surge", rendered)
         self.assertIn("[DEV ] overall=reconnecting imu=reconnecting dvl=online", rendered)
         self.assertIn("[NAV ] state=invalid", rendered)
         self.assertIn("transport=acknowledged", rendered)
         self.assertIn("runtime=rejected", rendered)
         self.assertIn("lifecycle=sent>acknowledged>rejected", rendered)
-        self.assertIn("blocked=imu_reconnecting", rendered)
-        self.assertIn("teleop_motion=single_key_only", rendered)
+        self.assertIn("[LINK] state=connected", rendered)
+        self.assertIn("one_motion_key_only", rendered)
 
 
 if __name__ == "__main__":

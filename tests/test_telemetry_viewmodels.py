@@ -27,6 +27,7 @@ class TelemetryViewModelTests(unittest.TestCase):
                 fault_state=0,
                 health_state=2,
                 command_status=3,
+                dvl_policy_enabled=1,
                 last_fault_code=4,
                 command_fault_code=0,
                 active_controller="heading_hold",
@@ -49,15 +50,16 @@ class TelemetryViewModelTests(unittest.TestCase):
         self.assertEqual(vm.status.nav_state, "Ok")
         self.assertEqual(vm.status.nav_fault_name, "None")
         self.assertEqual(vm.status.nav_diagnostic_summary, "degraded")
-        self.assertEqual(vm.status.capability_level, "relative_nav")
-        self.assertIn("IMU + DVL 在线时可观察相对运动", vm.status.capability_summary)
-        self.assertIn("观测能力", vm.status.motion_observation_hint)
+        self.assertEqual(vm.status.capability_level, "attitude_feedback")
+        self.assertIn("IMU 在线时可观察姿态反馈", vm.status.capability_summary)
+        self.assertIn("姿态角", vm.status.motion_observation_hint)
         self.assertTrue(vm.status.imu_online)
         self.assertTrue(vm.status.dvl_online)
         self.assertEqual(vm.status.imu_state, "online")
         self.assertEqual(vm.status.dvl_state, "online")
         self.assertEqual(vm.status.health_state, "Degraded")
         self.assertEqual(vm.status.command_status, "Executed")
+        self.assertTrue(vm.status.dvl_policy_enabled)
         self.assertEqual(vm.status.status_seq, 99)
         self.assertEqual(vm.status.command_cmd_seq, 123)
 

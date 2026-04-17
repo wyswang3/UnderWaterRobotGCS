@@ -51,6 +51,7 @@ class MsgType(IntEnum):
     SET_DOF_CMD     = 21
     ESTOP           = 22
     ARM             = 23      # ★ 新增：Arm / Disarm
+    DVL_POLICY      = 25
 
     # telemetry (ROV -> GCS)
     STATUS          = 40
@@ -66,6 +67,7 @@ class AckCode(IntEnum):
     INVALID_SESSION = 3
     SEQ_OLD_OR_DUP  = 4
     NOT_SUPPORTED   = 5
+    RUNTIME_ERROR   = 6
 
 
 # Keep numeric values aligned with your control modes (C++ WireControlMode)

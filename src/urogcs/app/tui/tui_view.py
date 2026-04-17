@@ -299,18 +299,52 @@ def _guidance(snap: TuiStatusSnapshot, local_mode_str: str) -> tuple[str, str]:
     )
 
 
+def _focus_state(blocked_reason: str) -> str:
+    if blocked_reason == "ready":
+        return "READY"
+    if blocked_reason in {
+        "estop_active",
+        "failsafe_active",
+        "nav_stale",
+        "nav_invalid",
+        "mode_switch_failed",
+        "command_failed",
+    }:
+        return "BLOCKED"
+    return "CHECK"
+
+
+def _auto_gate_label(snap: TuiStatusSnapshot) -> str:
+    if snap.nav_stale or not snap.nav_valid:
+        return "manual_only"
+    if snap.nav_degraded:
+        return "degraded_nav_only"
+    return "nav_ready"
+
+
+def _arming_hint(snap: TuiStatusSnapshot) -> str:
+    if snap.remote_estop:
+        return "clear_estop_first"
+    if not snap.remote_armed:
+        return "arm_required"
+    return "armed"
+
+
 class TuiDashboard:
     """
     多行仪表盘 HUD：
 
-      [ROV ] ...  (目标地址与绑定地址)
-      [CONN] ...  (连接/会话状态)
-      [DEV ] ...  (设备在线/重连/错绑)
-      [NAV ] ...  (导航可信度与故障摘要)
+      [FOCUS] ... (当前是否可操作、阻塞原因)
+      [NEXT ] ... (建议下一步动作)
+      [SAFE ] ... (Auto/Arm/E-STOP 安全门)
+      [ACT  ] ... (最常用离散动作)
+      [MOVE ] ... (连续 DOF 键位)
       [CTRL] ...  (本地/远端控制状态)
+      [NAV ] ...  (导航可信度与故障摘要)
+      [DEV ] ...  (设备在线/重连/错绑)
       [CMD ] ...  (sent / acknowledged / runtime 结果)
-      [HINT] ...  (客户下一步动作)
-      [SAFE] ...  (单键 teleop 安全提示)
+      [LINK] ...  (连接/会话状态)
+      [ROV ] ...  (目标地址与绑定地址)
       [DOF ] ...  (当前 6DOF 命令)
       [LOG ] ...  (最近一条日志)
 
@@ -320,7 +354,7 @@ class TuiDashboard:
       - 非 ANSI 终端（如某些 Windows 控制台）则退化为普通 print，每次多输出一组状态块。
     """
 
-    def __init__(self, panel_height: int = 10) -> None:
+    def __init__(self, panel_height: int = 13) -> None:
         self.panel_height = panel_height
         self.initialized = False
         self._last_width = 0
@@ -367,6 +401,9 @@ class TuiDashboard:
         runtime_state = _command_runtime_state(snap)
         lifecycle = _command_lifecycle(snap)
         blocked_reason, next_action = _guidance(snap, local_mode_str)
+        focus_state = _focus_state(blocked_reason)
+        auto_gate = _auto_gate_label(snap)
+        arming_hint = _arming_hint(snap)
 
         sent = "-"
         if snap.last_tx_seq is not None:
@@ -380,44 +417,53 @@ class TuiDashboard:
             if snap.last_ack_reason is not None:
                 ack = f"{ack}/{snap.last_ack_reason}"
 
-        line1 = (
-            f"[ROV ] target={snap.rov_ip}:{snap.rov_port}  "
-            f"bind={snap.bind_ip}:{snap.bind_port}"
-        )
+        line1 = f"[FOCUS] state={focus_state} blocker={blocked_reason}"
 
-        line2 = (
-            f"[CONN] state={conn_state} sess={int(snap.session_established)} "
-            f"link={int(snap.link_alive)} age={age_str} seq={snap.status_seq}"
-        )
+        line2 = f"[NEXT ] {next_action}"
 
         line3 = (
-            f"[DEV ] overall={device_state} imu={imu_state} dvl={dvl_state}"
+            f"[SAFE ] auto_gate={auto_gate} arming={arming_hint} "
+            f"local_estop={estop_int} remote_estop={int(snap.remote_estop)} "
+            f"armed={int(snap.remote_armed)} failsafe={int(snap.remote_failsafe)} thr={thr_str}"
         )
 
         line4 = (
+            "[ACT  ] SPACE estop_toggle | m clear_estop+center | "
+            ", arm | . disarm | 1/2/3 mode | -/+ throttle"
+        )
+
+        line5 = (
+            "[MOVE ] W/S surge | A/D sway | Q/E heave | H/G yaw | R/F roll | T/V pitch | one_motion_key_only"
+        )
+
+        line6 = (
+            f"[CTRL] state={control_state} local_mode={local_mode_str} remote_mode={snap.remote_mode} "
+            f"ctl={snap.active_controller or '-'}->{snap.desired_controller or '-'}"
+        )
+
+        line7 = (
             f"[NAV ] state={nav_state} reported={snap.nav_state} valid={int(snap.nav_valid)} "
             f"health={snap.health_state} nav_fault={snap.nav_fault_name} diag={snap.nav_diag_summary}"
         )
 
-        line5 = (
-            f"[CTRL] state={control_state} local_mode={local_mode_str} remote_mode={snap.remote_mode} "
-            f"local_estop={estop_int} armed={int(snap.remote_armed)} estop={int(snap.remote_estop)} "
-            f"failsafe={int(snap.remote_failsafe)} thr={thr_str} ctl={snap.active_controller or '-'}->{snap.desired_controller or '-'}"
-        )
+        line8 = f"[DEV ] overall={device_state} imu={imu_state} dvl={dvl_state}"
 
-        line6 = (
+        line9 = (
             f"[CMD ] sent={sent} transport={transport_state} ack={ack} runtime={runtime_state} "
             f"lifecycle={lifecycle} cmd_seq={snap.command_cmd_seq} fault={_command_fault_value(snap)}"
         )
 
-        line7 = f"[HINT] blocked={blocked_reason} next={next_action}"
-
-        line8 = (
-            "[SAFE] teleop_motion=single_key_only combo_motion_keys=ignored "
-            "reason=kinematics+battery_safety"
+        line10 = (
+            f"[LINK] state={conn_state} sess={int(snap.session_established)} "
+            f"link={int(snap.link_alive)} age={age_str} seq={snap.status_seq}"
         )
 
-        line9 = (
+        line11 = (
+            f"[ROV ] target={snap.rov_ip}:{snap.rov_port}  "
+            f"bind={snap.bind_ip}:{snap.bind_port}"
+        )
+
+        line12 = (
             f"[DOF ] surge={cmd.surge:+.2f} sway={cmd.sway:+.2f} "
             f"heave={cmd.heave:+.2f} roll={cmd.roll:+.2f} "
             f"pitch={cmd.pitch:+.2f} yaw={cmd.yaw:+.2f}"
@@ -426,9 +472,23 @@ class TuiDashboard:
         log_text = snap.last_log or ""
         if len(log_text) > 120:
             log_text = log_text[:117] + "..."
-        line10 = f"[LOG ] {log_text}"
+        line13 = f"[LOG ] {log_text}"
 
-        lines = [line1, line2, line3, line4, line5, line6, line7, line8, line9, line10]
+        lines = [
+            line1,
+            line2,
+            line3,
+            line4,
+            line5,
+            line6,
+            line7,
+            line8,
+            line9,
+            line10,
+            line11,
+            line12,
+            line13,
+        ]
 
         max_width = max(len(l) for l in lines)
         self._last_width = max(self._last_width, max_width)

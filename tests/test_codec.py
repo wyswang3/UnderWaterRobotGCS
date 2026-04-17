@@ -19,7 +19,7 @@ class StatusCodecTests(unittest.TestCase):
             1, 1, 0, 1,
             2, 1, 1, 3,
             0, 1, 1, 2,
-            3, 0,
+            3, 1,
             4,
             12, 8, 0x0440,
             5, 9, 77,
@@ -41,6 +41,7 @@ class StatusCodecTests(unittest.TestCase):
         self.assertEqual(st.fault_state, 1)
         self.assertEqual(st.health_state, 2)
         self.assertEqual(st.command_status, 3)
+        self.assertEqual(st.dvl_policy_enabled, 1)
         self.assertEqual(st.last_fault_code, 4)
         self.assertEqual(st.command_fault_code, 12)
         self.assertEqual(st.nav_fault_code, 8)
@@ -73,6 +74,7 @@ class StatusCodecTests(unittest.TestCase):
         self.assertEqual(st.auto_fail_limit, 10)
         self.assertEqual(st.t_ns, 42)
         self.assertEqual(st.command_status, 0)
+        self.assertEqual(st.dvl_policy_enabled, 0)
         self.assertEqual(st.status_seq, 0)
 
 

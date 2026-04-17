@@ -24,6 +24,12 @@ class ArmCmd:
     enable: int  # 0/1，1=arm, 0=disarm
 
 
+@dataclass
+class DvlPolicyCmd:
+    enable: int  # 0/1，1=enable DVL policy, 0=disable
+    submerged_confirmed: int  # 0/1，1=operator confirmed the DVL is already submerged
+
+
 def wire_mode_name(mode: int) -> str:
     """Map wire control mode numeric values into stable UI labels."""
     try:
@@ -179,6 +185,7 @@ class StatusTelemetry:
     fault_state: int = 0
     health_state: int = 0
     command_status: int = 0
+    dvl_policy_enabled: int = 0
     last_fault_code: int = 0
     command_fault_code: int = 0
     nav_fault_code: int = 0
